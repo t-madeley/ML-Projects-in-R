@@ -1,0 +1,997 @@
+---
+title: "Classification"
+author: "Thomas Madeley"
+date: "29/11/2020"
+output: html_document
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+The aim of this report is to build the most accurate classification model possible to predict whether a tumor is malignent or benign from the paramets given in the dataset. The dataset that will be used is the Breast Cancer Wisconsin (Diagnostic) Data Set from UCI Machine Learning. It is a publicly available dataset and the version to be used in this report is Version 2, last update 25.09.2016.
+
+https://archive.ics.uci.edu/ml/datasets/Breast+Cancer+Wisconsin+(Diagnostic)
+
+
+nrow gives the number of rows
+colnames gives the column names
+str gives the structure of the dataset with column names and most importantly, column type.
+summary gives summary statistics for each column.
+
+
+
+Importing the dataset:
+```{r}
+
+
+dataset<- read.csv("data.csv", header =TRUE)
+
+nrow(dataset)
+colnames(dataset)
+str(dataset)
+summary(dataset)
+
+
+
+```
+
+It can see from the above functions that there are:
+
+33 variables and 569 rows, of which the final column 'X' appears to be full of NA values and can be removed. 
+
+The diagnosis column is the only character column and contains the vital information for classification, whether the cell nucleus is malignent or benign. This will be our label. All of the other variables, except id, are numeric. 
+
+It can be seen from the summary statistics that there is a very large spread in mean values of the variables. This will require normalisation or standardisation at a later point to ensure that variables with a very small numeric value are not overshadowed by values with large values. 
+
+Secondly, it can be seen that other than the 33rd 'X' column, there are no missing values in any other variable.
+
+Additionally, it can be seen that some variables have a minimum value of 0. Before continuing, it must be considered whether logically a 0 value for these items is relevant or should it be considered as a missing value. It can be seen that the only values that do have 0 values, are related to concavity. Can a nucleus have a concavity of 0? Yes it can and therefor these are valid rows and will be included in the analysis and prediction. If there was a 0 value for Radius_mean then this should be classed as a NA value as it is not possible to have a radius of 0. 
+
+
+
+Firstly removing the 'X' column using dplyr's select function:
+
+
+```{r}
+library(dplyr)
+dataset <- select(dataset, c(-X))
+colnames(dataset)
+head(dataset)
+```
+
+In order to perform classification on the 'diagnosis' column, the character values will need to be encoded to binary values of 1 and 0:
+
+Using mutate and recode functions:
+
+"M" <- 1 for a positive diagnosis
+"B" <- 0 for a negative diagnosis
+
+
+```{r}
+dataset_binary <- dataset %>% mutate(diagnosis = recode(diagnosis, "M" = 1, "B" = 0))
+head(dataset_binary)
+
+
+```
+
+
+
+
+The next step is to evaluate the correlation between the variables. This will identify which variables will be have a strong influence on the models prediction and those that will not. If a variable has very high correlation with other variables, it may not be useful to include it in the model. This is due to similarity between the 
+
+Using the R cor function, the reshape2 librarys' melt function and ggplot2's geom_tile() plot function a heatmap of all of the variables will be plotted. 
+
+cor function calculates the correlation between each variable and returns it in a matrix.  
+
+melt function pivots the correlation matrix into 3 columns so as to make it easier to plot in GGplot's geom_tile which requires 3 values, x = First Variable, y = Second Variable  and fill = Correlation coeficient. 
+
+plotting the heatmap with the ggplot geom_tile function, adjusting the x axis labels to make it a bit easier to leave. 
+
+sorting the melted correlation matrix in descending order, and removing correlations of 1. This will allow identification of the highest correllated values that are not identical: perimeter_mean -> perimerter mean etc. 
+
+reference: http://www.sthda.com/english/wiki/ggplot2-quick-correlation-matrix-heatmap-r-software-and-data-visualization
+```{r}
+library(reshape2)
+library(ggplot2)
+
+correlation_matrix <- cor(dataset_binary)
+
+melt_correlation_matrix <- melt(correlation_matrix)
+
+
+ggplot(data = melt_correlation_matrix, aes(x=Var1, y=Var2, fill=value)) + geom_tile() + ggtitle("Correlation Heat Map") + xlab("Variables") + ylab("Variables") + labs(fill= "Correlation Coefficient") + theme(axis.text.x=element_text(angle=90, hjust=1, size=7)) + theme(axis.text.y=element_text(size=8))  
+
+sorted_correlations <- melt_correlation_matrix %>% filter(value < 1) %>% arrange(desc(value))
+
+
+
+```
+The sorted correlations chart shows which variables are very highly correlated. Highly correlated will be defined as correlation coefficient >0.9
+
+Perimeter_mean and radius_mean
+perimeter_worst and radius_worst
+area_mean and radius_mean
+area_worst and radius_worst
+etc
+
+concave.points_mean and concavity_mean
+texture_worst and texture_mean
+concave.points_worst and concave.points_mean
+
+
+
+
+In order to reduce the number of variables used in the model, where there is very high correlation, one of the values will be dropped. For the physical dimension parameters which are mathematically related anyway, the radius values will be kept and perimeter and area will be dropped.
+
+the following variables will be dropped:
+
+area_se
+area_worst
+concave.points_mean
+concave.points_worst
+texture_worst
+
+additionally id can be dropped.
+
+
+Dropping variables and checking number of rows and columns with the dim function:
+
+```{r}
+dataset_dropped <- select(dataset_binary, -c(area_se, area_worst, perimeter_worst,perimeter_mean, perimeter_se,id))
+dim(dataset_dropped)
+
+
+
+head(dataset_dropped)
+
+
+
+```
+
+Plotting ratio of cancerous to non cancerous:
+
+
+
+
+
+```{r}
+library(RColorBrewer)
+ratios<-dataset_dropped %>% group_by(diagnosis) %>% summarise(Percentage = round((n()/569) *100))
+
+ggplot(ratios, aes(x = as.factor(diagnosis),y=Percentage, fill=as.factor(diagnosis))) +
+  geom_bar(stat="identity") +
+  geom_text(aes(label = Percentage,vjust=3, fonface = "bold")) +
+  theme_grey(base_size=18) +
+  theme(legend.title = element_blank(), legend.position = "bottom") + xlab("Diagnosis") +
+  ggtitle("Non Cancerous and Cancerous diagnosis")+ scale_colour_discrete(labels = c("Non Cancerous", "Cancerous")) + 
+  theme(axis.text.y=element_text(size=15), axis.text.x=element_text(size=15)) 
+```
+Plotting distribution of all variables:
+```{r}
+library(purrr)
+library(tidyr)
+
+dataset_dropped %>% keep(is.numeric) %>% gather() %>% ggplot(aes(value)) + facet_wrap(~key, scales = "free") + geom_histogram() + theme_grey(base_size = 12)
+```
+
+
+
+
+
+
+
+
+
+This new dataset of 26 columns is now ready to be used in modeling. 
+
+The data will first be split into testing a training data using caTools Split function.
+
+
+
+```{r}
+library(caTools)#
+set.seed(123456)
+head(dataset_dropped)
+split = sample.split(dataset_dropped$diagnosis, SplitRatio = 0.8)
+training_set = subset(dataset_dropped, split == TRUE)
+test_set = subset(dataset_dropped, split == FALSE)
+
+head(training_set)
+nrow(training_set)
+
+head(test_set)
+nrow(test_set)
+```
+
+The models can now be trained with the training dataset:
+
+Creating a Logistic Regression model with diagnosis as the target variable:
+
+Uses formula =  diagnosis ~ . -> this states diagnosis is the target and that the logistic regression model will use all of the other variables to predict the outcome.
+family = binomial indicates its a binomial prediction
+data = training set tells the model to train itself on the training data. 
+
+prob_pred calculates the probabilities for each row that the diagnosis is 1 or Malignent using the logistic regression classifier. 
+
+y_pred takes the prediction probabilities and rounds them and returns a vector of 1 and 0 predictions.
+
+cm creates a confusion matrix. test_set[, 2] takes the diagnosis column from the test data. These are the correct predictions. The second argument is y_pred. The result is a matrix in the format:
+
+
+"True Negative, False Positive
+False Negative, True Positve"
+
+
+The accuracy function from the MLmetrics library returns the the accuracy score of the model. ]
+
+Finally, the confusionMatrix function from the "caret" library. This function returns a confusion matrix and also further summary statistics for the model. 
+
+
+reference: https://boostedml.com/2019/05/classification-accuracy-in-r-difference-between-accuracy-precision-recall-sensitivity-and-specificity.html
+
+```{r}
+library(caret)
+library(e1071)
+library(MLmetrics)
+
+
+logistic_regression_classifier = glm(formula = diagnosis ~ .,
+                 family = binomial,
+                 data = training_set)
+
+logistic_regression_classifier$family
+prob_pred = predict(logistic_regression_classifier, type = 'response', newdata = test_set)
+
+y_pred = ifelse(prob_pred > 0.5, 1, 0)
+
+
+cm = table(test_set[, 1], y_pred)
+cm
+
+logistic_accuracy<- Accuracy(y_pred = y_pred, y_true = test_set[,1])
+
+confusionMatrix(factor(round(y_pred)),factor(test_set[,1]))
+
+sigmoid = function(x) {
+   1 / (1 + exp(-x))
+}
+
+x <- seq(-5, 5, 0.01)
+
+
+
+
+
+```
+
+In general modelling, accuracy is a very good metric for measuring the quality of a model. However with medical data, sensitivity and specificity may be better metrics. Sensitivity is defined as true positives/(true positives + false negatives). True positive is a person with cancer correctly diagnoses, a false negative is a person with cancer diagnosed as healthy.  A sensitivity of in the context of cancer diagnosis of 100% or 1 would mean that no positive cases were missed, and everyone with cancer was correctly diagnosed. However, a sensitivity of 1 or 100% can also mean that people who do NOT have cancer may be given a false positive diagnosis, as this is not taken into account. These false positive diagnosis may not be an issue for some illnesses, however cancer treatment can be very invasive and damaging to a healthy person. In addition, resources for cancer treatment may be limited or very expensive. There may be further testing after an initial diagnosis that would mitigate the costs of a false positive diagnosis, but as this is not known in the scope of this analysis, another metric must be considered.
+
+This further metric is specificity. Specificity is defined as: true negatives/(true negatives + false positives). True negatives are people without cancer correctly diagnosed, a false positive is a healthy person diagnosed with cancer incorrectly. A perfect model would have both a specificty and sensitivity of 100% or 1. In the context of this data, sensitivity will be considered the most important metric as a false negative (missed cancer diagnosis) will be considered to be worse than a false positive (an incorrect cancer diagnosis).
+
+It can be see that the logistic regression model has an accuracy of 0.911, sensitivity of 0.9296 and specificity of 0.9524. This is a good starting point, further classification models will be considered and the accuracy, specificity and sensitivity will be compared. 
+
+
+Next K nearest neighbours will be checked:
+
+Using the 'class' library's knn function. values of K were tried between 1 and 10. 
+
+train is set to be training_set[,-1] removes the diagnoses labels columns. This particular functionrequires the labels separately.
+
+test is set to be the test set with, once again, the labels are removed. 
+
+cl contains the labels from the training dataset.
+
+Values of k between 1 and 10 were tried and k=5 returned the highest accuracy.
+
+
+
+
+```{r}
+library(class)
+
+y_pred = knn(train = training_set[, -1],
+             test = test_set[, -1],
+             cl = training_set[, 1],
+             k = 5)
+
+cm = table(test_set[, 1], y_pred)
+cm
+
+knn_accuracy<- Accuracy(y_pred = y_pred, y_true = test_set[,1])
+
+confusionMatrix(factor((y_pred)),factor(test_set[,1]))
+
+library(GGally)
+ggpairs(cbind(test_set[-1], Cluster=as.factor(y_pred)),
+        columns=1:5, aes(colour=Cluster, alpha=0.5),
+        lower=list(continuous="points"),
+        upper=list(continuous="blank"),
+        axisLabels="none", switch="both") +
+        theme_grey()
+
+ggpairs(cbind(test_set, Cluster=as.factor(y_pred)),
+        columns=6:10, aes(colour=Cluster, alpha=0.5),
+        lower=list(continuous="points"),
+        upper=list(continuous="blank"),
+        axisLabels="none", switch="both") +
+        theme_grey()
+
+ggpairs(cbind(test_set, Cluster=as.factor(y_pred)),
+        columns=11:15, aes(colour=Cluster, alpha=0.5),
+        lower=list(continuous="points"),
+        upper=list(continuous="blank"),
+        axisLabels="none", switch="both") +
+        theme_grey()
+```
+
+It can be seen that KNN has poor accuracy and specificity at 0.9381 and 0.9577 respectively. Sensitivity remains quite high at .9048 meaning that most positive diagnoses were mate correctly but it is still inferior to the logistic regression model at all values of k between 1 and 10.
+
+Next support vector machine will be used@
+svm function requires library e1071, already loaded.
+
+```{r}
+
+
+svm_classifier = svm(formula = diagnosis ~ .,
+                 data = training_set,
+                 type = 'C-classification',
+                 kernel = 'linear')
+
+y_pred = predict(svm_classifier, newdata = test_set[-1])
+cm = table(test_set[, 1], y_pred)
+cm
+
+svm_accuracy<- Accuracy(y_pred = y_pred, y_true = test_set[,1])
+
+confusionMatrix(factor((y_pred)),factor(test_set[,1]))
+```
+
+The support vector machine model has an exceptionally good accuracy score of 0.965 with a senitivity of 0.972 and specificity of 0.952. This is now the preferred model.
+
+Next kernel svm will be used:
+kernel changed from 'linear' to 'radial'. 
+
+@@@@explain difference between kernal and normal svm'
+
+```{r}
+kernel_svm_classifier = svm(formula = diagnosis ~ .,
+                 data = training_set,
+                 type = 'C-classification',
+                 kernel = 'radial')
+
+y_pred = predict(kernel_svm_classifier, newdata = test_set[,-1])
+cm = table(test_set[, 1], y_pred)
+cm
+
+kernel_svm_accuracy <- Accuracy(y_pred = y_pred, y_true = test_set[,1])
+
+confusionMatrix(factor((y_pred)),factor(test_set[,1]))
+```
+The kernel support vector machine model has a slightly improved accuracy score of 0.9735 with a sensitivity of 0.972 and specificity of 0.976. The sensitivity is identical but  This is now the preferred model.
+
+
+Decision tree classification will now be used:
+
+```{r}
+library(rpart)
+d_tree_classifier = rpart(formula = diagnosis ~ .,
+                   data = training_set, minsplit = 18,
+                   minbucket= 4)
+
+prob_pred = predict(d_tree_classifier, newdata = test_set[,-1])
+y_pred = ifelse(prob_pred > 0.5, 1, 0)
+cm = table(test_set[, 1], y_pred)
+cm
+
+d_tree_accuracy<- Accuracy(y_pred = y_pred, y_true = test_set[,1])
+confusionMatrix(factor((y_pred)),factor(test_set[,1]))
+```
+The decision tree classifier has an accuracy of 0.9469 and a sensitivity of 0.9437 and a specificity of 0.9524.
+
+Next the Random_forest_algorithm:
+
+```{r}
+#library(randomForest)
+
+#r_f_classifier = randomForest( diagnosis ~ ., data = training_set,
+                         # ntree = 500, keep.forest=TRUE)
+#prob_pred = predict(r_f_classifier, newdata = test_set[,-1])
+#y_pred = ifelse(prob_pred > 0.5, 1, 0)
+
+#cm = table(test_set[, 1], y_pred)
+#cm
+#r_forest_accuracy<- Accuracy(y_pred = y_pred, y_true = test_set[,1])
+#confusionMatrix(factor((y_pred)),factor(test_set[,1])) 
+```
+The random forest model has an accuracy of 0.9646 and a sensitivity of 0.9577 and a specificity on 0.9762. This is very good but still slightly worse than the kernel support vector machine model.
+
+Now that all models have been run on the real data, the real data will now be feature scaled in order to see if this yields a more accurate mode with better sensitivity. 
+
+The models most effected by feature scaling are distance base algoriths. This is because in their mathematical formulas, they are calculating some kind of distance between the points in order to classify them. These models include KNN, SVM and kernel SVM. 
+
+
+Feature scaling the test data and training data:
+
+The datasets will be *standardised* using the 'scale' function to standardise them.
+
+```{r}
+training_set[,-1] = scale(training_set[,-1], center=TRUE, scale=TRUE)
+test_set[,-1] = scale(test_set[,-1], center = TRUE, scale =TRUE)
+training_set_scaled <- training_set
+test_set_scaled <- test_set
+head(training_set_scaled)
+head(test_set_scaled)
+```
+Repeating the implementation of the machine learning models with the scaled test and training datasets:
+```{r}
+library(MLmetrics)
+# Logisting Regression
+logistic_regression_classifier = glm(formula = diagnosis ~ .,
+                 family = binomial,
+                 data = training_set_scaled)
+logistic_regression_classifier$link
+
+
+prob_pred = predict(logistic_regression_classifier, type = 'response', newdata = test_set)
+
+y_pred = ifelse(prob_pred > 0.5, 1, 0)
+
+
+cm = as.matrix(table(test_set_scaled[, 1], y_pred))
+cm
+
+scaled_logistic_accuracy <- Accuracy(y_pred = y_pred, y_true = test_set_scaled[,1])
+
+Logistic_Regression <- confusionMatrix(factor(test_set_scaled[,1]),factor((y_pred)), positive = "1")
+Logistic_Regression
+```
+
+Logistic Regression Confusion Matrix Plot:
+
+
+```{r}
+library(ggplot2)
+library(dplyr)
+
+table <- data.frame(Logistic_Regression$table)
+confusion_labels <- c("True Negative","False Positive","False Negative","True Positive")
+plotTable <- table %>%
+  mutate(goodbad = ifelse(table$Prediction == table$Reference, "Good_Prediction", "Bad_Prediction")) %>%
+  group_by(Reference) %>%
+  mutate(prop = Freq/sum(Freq))
+
+# fill alpha relative to sensitivity/specificity by proportional outcomes within reference groups (see dplyr code above as well as original confusion matrix for comparison)
+lr_cm_plot <- ggplot(data = plotTable, mapping = aes(x = Reference, y = Prediction, fill = goodbad, alpha = prop)) +
+  geom_tile() +
+  geom_text(aes(label = Freq), vjust = .5, fontface  = "bold", alpha = 1) + 
+  geom_text(aes(label = confusion_labels, vjust=-1, fonface = "bold", alpha = 1)) +
+ 
+  scale_fill_manual(values = c(Good_Prediction = "green", Bad_Prediction = "red")) +
+  theme_bw() +
+  xlim(rev(levels(table$Reference))) +
+  xlab("True Diagnosis") +
+  ylab("Predicted Diagnosis")+
+  ggtitle("Logistic Regression Confusion Matrix")
+
+
+lr_cm_plot
+
+
+```
+
+
+
+
+
+KNN:
+
+```{r}
+y_pred = knn(train = training_set_scaled[, -1],
+             test = test_set_scaled[, -1],
+             cl = training_set_scaled[, 1],
+             k = 5,
+             prob = TRUE)
+
+cm = table(y_pred, test_set_scaled[, 1])
+cm
+
+scaled_knn_accuracy <- Accuracy(y_pred = y_pred, y_true = test_set_scaled[,1])
+
+knn_cm<- confusionMatrix(factor((y_pred)),factor(test_set_scaled[,1]), positive = "1")
+knn_cm
+
+```
+
+KNN Confusion Matrix:
+```{r}
+library(ggplot2)
+library(dplyr)
+
+table <- data.frame(knn_cm$table)
+confusion_labels <- c("True Negative","False Positive","False Negative","True Positive")
+plotTable <- table %>%
+  mutate(goodbad = ifelse(table$Prediction == table$Reference, "Good_Prediction", "Bad_Prediction")) %>%
+  group_by(Reference) %>%
+  mutate(prop = Freq/sum(Freq))
+
+# fill alpha relative to sensitivity/specificity by proportional outcomes within reference groups (see dplyr code above as well as original confusion matrix for comparison)
+knn_cm_plot <- ggplot(data = plotTable, mapping = aes(x = Reference, y = Prediction, fill = goodbad, alpha = prop)) +
+  geom_tile() +
+  geom_text(aes(label = Freq), vjust = .5, fontface  = "bold", alpha = 1) + 
+  geom_text(aes(label = confusion_labels, vjust=-1, fonface = "bold", alpha = 1)) +
+ 
+  scale_fill_manual(values = c(Good_Prediction = "green", Bad_Prediction = "red")) +
+  theme_bw() +
+  xlim(rev(levels(table$Reference))) +
+  xlab("True Diagnosis") +
+  ylab("Predicted Diagnosis")+
+  ggtitle("K Nearest Neighbours, K= 5: Confusion Matrix")
+
+knn_cm_plot
+
+
+```
+
+
+
+SVM: Linear does not require gamma
+
+```{r}
+svm_classifier = svm(formula = diagnosis ~ .,
+                 data = training_set_scaled,
+                 type = 'C-classification',
+                 kernel = 'linear',
+                 cost = 1
+                 )
+
+y_pred = predict(svm_classifier, newdata = test_set_scaled[-1])
+cm = table(test_set_scaled[, 1], y_pred)
+cm
+
+scaled_svm_accuracy <- Accuracy(y_pred = y_pred, y_true = test_set_scaled[,1])
+
+svm_cm <- confusionMatrix(factor((y_pred)),factor(test_set_scaled[,1]), positive = "1")
+svm_cm
+```
+SVM Confusion Matrix Plot:
+
+```{r}
+library(ggplot2)
+library(dplyr)
+
+table <- data.frame(svm_cm$table)
+confusion_labels <- c("True Negative","False Positive","False Negative","True Positive")
+plotTable <- table %>%
+  mutate(goodbad = ifelse(table$Prediction == table$Reference, "Good_Prediction", "Bad_Prediction")) %>%
+  group_by(Reference) %>%
+  mutate(prop = Freq/sum(Freq))
+
+# fill alpha relative to sensitivity/specificity by proportional outcomes within reference groups (see dplyr code above as well as original confusion matrix for comparison)
+svml_cm_plot <- ggplot(data = plotTable, mapping = aes(x = Reference, y = Prediction, fill = goodbad, alpha = prop)) +
+  geom_tile() +
+  geom_text(aes(label = Freq), vjust = .5, fontface  = "bold", alpha = 1) + 
+  geom_text(aes(label = confusion_labels, vjust=-1, fonface = "bold", alpha = 1)) +
+ 
+  scale_fill_manual(values = c(Good_Prediction = "green", Bad_Prediction = "red")) +
+  theme_bw() +
+  xlim(rev(levels(table$Reference))) +
+  xlab("True Diagnosis") +
+  ylab("Predicted Diagnosis")+
+  ggtitle("SVM Linear Kernel, Cost = 1: Confusion Matrix")
+
+svml_cm_plot
+```
+
+
+
+Kernel SVM:
+
+```{r}
+kernel_svm_classifier = svm(formula = diagnosis ~ .,
+                 data = training_set_scaled,
+                 type = 'C-classification',
+                 kernel = 'radial',
+                 cost = 4)
+
+y_pred = predict(kernel_svm_classifier, newdata = test_set_scaled[-1])
+cm = table(test_set_scaled[, 1], y_pred)
+cm
+
+scaled_kernel_svm_accuracy <- Accuracy(y_pred = y_pred, y_true = test_set_scaled[,1])
+
+ksvm_cm<- confusionMatrix(factor(test_set_scaled[,1]), factor((y_pred)), positive = "1")
+ksvm_cm
+```
+Kernel SVM confusion matrix
+```{r}
+library(ggplot2)
+library(dplyr)
+
+table <- data.frame(ksvm_cm$table)
+confusion_labels <- c("True Negative","False Positive","False Negative","True Positive")
+plotTable <- table %>%
+  mutate(goodbad = ifelse(table$Prediction == table$Reference, "Good_Prediction", "Bad_Prediction")) %>%
+  group_by(Reference) %>%
+  mutate(prop = Freq/sum(Freq))
+
+# fill alpha relative to sensitivity/specificity by proportional outcomes within reference groups (see dplyr code above as well as original confusion matrix for comparison)
+ svmr_cm_plot <- ggplot(data = plotTable, mapping = aes(x = Reference, y = Prediction, fill = goodbad, alpha = prop)) +
+  
+  geom_tile() +
+  geom_text(aes(label = Freq), vjust = .5, fontface  = "bold", alpha = 1) + 
+  geom_text(aes(label = confusion_labels, vjust=-1, fonface = "bold", alpha = 1)) +
+ 
+  scale_fill_manual(values = c(Good_Prediction = "green", Bad_Prediction = "red")) +
+  theme_bw() +
+  xlim(rev(levels(table$Reference))) +
+  xlab("True Diagnosis") +
+  ylab("Predicted Diagnosis")+
+  ggtitle("SVM Radial Kernel, Cost = 4: Confusion Matrix")
+ 
+ svmr_cm_plot
+
+
+```
+
+Decision Tree:
+
+```{r}
+library(rpart)
+d_tree_classifier = rpart(formula = diagnosis ~ .,
+                   data = training_set_scaled,
+                   minsplit = 18
+                   ,
+                   minbucket = 4
+                  )
+
+prob_pred = predict(d_tree_classifier, newdata = test_set_scaled[-1])
+y_pred = ifelse(prob_pred > 0.5, 1, 0)
+cm = table(test_set_scaled[, 1], y_pred)
+cm
+
+scaled_d_tree_accuracy <- Accuracy(y_pred = y_pred, y_true = test_set_scaled[,1])
+d_tree_cm<-confusionMatrix(factor((y_pred)),factor(test_set_scaled[,1]),, positive = "1")
+d_tree_cm
+```
+
+Decision Tree Confusion Matrix Plot:
+
+```{r}
+library(ggplot2)
+library(dplyr)
+
+table <- data.frame(d_tree_cm$table)
+confusion_labels <- c("True Negative","False Positive","False Negative","True Positive")
+plotTable <- table %>%
+  mutate(Good_Or_Bad = ifelse(table$Prediction == table$Reference, "Good_Prediction", "Bad_Prediction")) %>%
+  group_by(Reference) %>%
+  mutate(Proportion = Freq/sum(Freq))
+
+# fill alpha relative to sensitivity/specificity by proportional outcomes within reference groups (see dplyr code above as well as original confusion matrix for comparison)
+
+
+dtree_cm_plot <- ggplot(data = plotTable, mapping = aes(x = Reference, y = Prediction, fill = Good_Or_Bad , alpha = Proportion)) +
+  geom_tile() +
+  geom_text(aes(label = Freq), vjust = .5, fontface  = "bold", alpha = 1) + 
+  geom_text(aes(label = confusion_labels, vjust=-1, fonface = "bold", alpha = 1)) +
+ 
+  scale_fill_manual(values = c(Good_Prediction = "green", Bad_Prediction = "red")) +
+  theme_bw() +
+  xlim(rev(levels(table$Reference))) +
+  xlab("True Diagnosis") +
+  ylab("Predicted Diagnosis")+
+  ggtitle("Decision Tree With Scaling, minsplit = 18, minbucket = 4: Confusion Matrix")
+dtree_cm_plot
+
+```
+
+
+
+Random forest: - Decided not to implement
+
+
+```{r}
+#r_f_classifier = randomForest( diagnosis ~ ., data = training_set_scaled,
+                          #ntree = 500, keep.forest=TRUE)
+#prob_pred = predict(r_f_classifier, newdata = test_set_scaled[-1])
+#y_pred = ifelse(prob_pred > 0.5, 1, 0)
+#cm = table(test_set_scaled[, 1], y_pred)
+#cm
+#scaled_rf_accuracy <- Accuracy(y_pred = y_pred, y_true = test_set_scaled[,1])
+#confusionMatrix(factor((y_pred)),factor(test_set_scaled[,1]))
+
+```
+Cross validating results:
+
+Cross validation will be done on the most accurate models to ensure the result is not due to sampling error/bias. 
+
+As this is medical data it is important that a model is not deployed until cross validation has been performed. 
+
+caret's train function will be used to train multiple SVM models. First createMultifolds will be used to create 100 'folds' or sets of data. these 100 sets will be used to run SVM ten times using unique set of folds each time. createMultiFolds returns a list of indexes rather than a dataframe. 
+
+
+
+
+```{r}
+library(caret)
+library(doSNOW)
+library(LiblineaR)
+library(kernlab) # for svmRadial
+
+
+set.seed(123456)
+cl<- makeCluster(10, type="SOCK")#Tells R to use 10 cpu threads instead of 1.
+registerDoSNOW(cl) # initialises the 10 cpu thread cluster
+
+# k = number of folds
+#times = number of repeats
+#Creates lists of indexes of rows for the folds
+cv_folds_index <- createMultiFolds(as.factor(dataset_dropped$diagnosis), k=5, times = 10) 
+
+#specifies parameters for train function
+#method = repeated cross validation
+#number = number of folds
+#repeats = number of repeated validations
+#index = indexes used to create the folds
+cross_validator_control <- trainControl(method = "repeatedcv", number = 5, repeats = 10, index = cv_folds_index)
+
+
+#Uses the trainControl parameters to build model and cross validate
+#x= training parameters, labels removed
+#y= training labels
+#method = model type: SVM Radial Kernel with Cost parameter
+#trControl = control parameters specified above
+#tunegrid =  values for Cost to be test: from 1 to 10 for 10 values
+#preProcess = Scaling, centered
+svm_cross_validator <- train(x = dataset_dropped[-1], y = as.factor(dataset_dropped$diagnosis), method = "svmRadialCost", trControl = cross_validator_control, tuneGrid = expand.grid(C=seq(1,10, length = 10)), preProcess = c("center", "scale"))
+
+
+stopCluster(cl) #closes the 10 cpu thread cluster to return to 1 thread
+
+
+
+```
+
+
+Checking the results of the cross validation:
+
+```{r}
+plot.new
+plot(svm_cross_validator)
+svm_cross_validator
+
+kfcv_cm <- confusionMatrix(svm_cross_validator)
+
+```
+
+
+
+
+```{r}
+
+library(ggplot2)
+library(dplyr)
+
+table <- data.frame(round(kfcv_cm$table))
+confusion_labels <- c("True Negative","False Positive","False Negative","True Positive")
+plotTable <- table %>%
+  mutate(Good_Or_Bad = ifelse(table$Prediction == table$Reference, "Good_Prediction", "Bad_Prediction")) %>%
+  group_by(Reference) %>%
+  mutate(Proportion = Freq/sum(Freq))
+
+# fill alpha relative to sensitivity/specificity by proportional outcomes within reference groups (see dplyr code above as well as original confusion matrix for comparison)
+
+
+ggplot(data = plotTable, mapping = aes(x = Reference, y = Prediction, fill = Good_Or_Bad , alpha = Proportion)) +
+  geom_tile() +
+  geom_text(aes(label = Freq), vjust = .5, fontface  = "bold", alpha = 1) + 
+  geom_text(aes(label = confusion_labels, vjust=-1, fonface = "bold", alpha = 1)) +
+ 
+  scale_fill_manual(values = c(Good_Prediction = "green", Bad_Prediction = "red")) +
+  theme_bw() +
+  xlim(rev(levels(table$Reference))) +
+  xlab("True Diagnosis") +
+  ylab("Predicted Diagnosis")+
+  ggtitle("KFCV SVM Radial Kernel Mean Confusion Matrix, Cost = 2" )
+
+
+```
+
+
+
+
+
+
+
+
+
+Plotting Results:
+
+```{r}
+model_stats2 <- read.csv("model_stats.csv", header = TRUE)
+
+colnames(model_stats2)[1] = "Model"
+
+model_stats <- model_stats2 %>% slice(-c(6))
+model_stats_long <- melt(model_stats, id.vars = c("Model"))
+model_stats_long
+accuracy_stats_bar <- ggplot(model_stats_long, aes(x= Model, y =value, fill = variable, label = value  )) + geom_bar(stat = 'identity', position = "dodge") + theme_grey() +  geom_text(position = position_dodge2(width = 0.9, preserve = "single"), angle = 90, vjust=0.25, hjust=2)+
+  theme(axis.text.x=element_text(angle=90, hjust=1, size=10)) +
+  ggtitle("Model Accuracy, Sensitivity and Specificity Results (%)")
+  
+accuracy_stats_bar
+
+```
+
+Sensitivity Bar:
+
+```{r}
+sens_stats_bar <- ggplot(model_stats, aes(x= Model, y =Sensitivity, fill = Model  )) + geom_bar(stat = 'identity') + theme_grey() + scale_fill_brewer(palette = "Set2")+ geom_text(aes(label = Sensitivity), vjust = 1, size = 5,
+            position = position_dodge(0.2)) +
+  theme(axis.text.x=element_text(angle=90, hjust=1, size=10)) +
+  ggtitle("Model Sensitivity (%)")
+  
+sens_stats_bar
+
+```
+
+Specificity Bar
+
+```{r}
+spec_stats_bar <- ggplot(model_stats, aes(x= Model, y =Specificity, fill = Model)) + geom_bar(stat = 'identity') + theme_grey() + scale_fill_brewer(palette = "Set2")+ geom_text(aes(label = Specificity), vjust = 1, size = 5, position = position_dodge(0.2)) +
+  theme(axis.text.x=element_text(angle=90, hjust=1, size=10)) +
+  ggtitle("Model Specificity (%)")
+  
+spec_stats_bar
+```
+
+
+
+
+
+
+```{r}
+library(shiny)
+library(shinydashboard)
+library(shinyBS)
+
+intro <- "This dashboard displays the results of my paper in which breast cancer tissue samples were classified with different machine learning algorithms. This classification paper was written as part of the Applied Statistics and Data Mining module of the MSc Data Science program at the University of Salford. For further details please see the 'Info' page."
+subtitlecm <- "Click on the desired model name to display the confusion matrix. Multiple selections can be made."
+table_desc <- "The dataset used for this paper comes from the UCI machine learning repository as is from a study originally conducted by the University of Wisconsin (W. Nick Street, W. H. Wolberg, and O. L. Mangasarian, 1993 ). The dataset contains 569 records with 32 real value features. Each record is a digital analysis of an image taken of cell nuclei present in a sample of breast tissue mass taken from a patient with a suspicious tumour. Each record is labelled with a diagnosis of either malignant or benign."
+about_desc <- "Cancer is a leading cause of death in the United Kingdom and across the world. 50% of people in the United Kingdom will be diagnosed with some form of cancer in their lifetime. Among those, breast cancer (BC) is the most common in the United Kingdom with 55,200 cases every year making up 15% of all new cancer cases (Breast cancer statistics, 2020). As with all cancers, early diagnosis is strongly linked to survival rates and therefore creating tools that may increase diagnosis speed may save lives. This dashboard displays results of a paper that explores a labelled dataset using a variety of supervised machine learning methodologies with cross validation to assess whether established machine learning models can be used to accurately diagnose breast cancers from digital analysis of cell nuclei."
+author <- ("Thomas Madeley,
+t.madeley@edu.salford.ac.uk,
+Student Number: @00291471, 
+MSc Data Science, 
+University of Salford, 
+December 2020")
+
+more <- "This classification paper was written as part of the Applied Statistics and Data Mining module of the MSc Data Science program at the University of Salford. The aim of the paper was to assess the ability of different machine learning methodologies to diagnose cancer cases. The dataset was obtained from the UCI machine learning repository as is from a study originally conducted by the University of Wisconsin (W. Nick Street, W. H. Wolberg, and O. L. Mangasarian, 1993 ). The dataset contains 569 records with 32 real value features. Each record is a digital analysis of an image taken of cell nuclei present in a sample of breast tissue mass taken from a patient with a suspicious tumour. Each record is labelled with a diagnosis of either malignant or benign."
+
+datalink <- "The dataset can be obtained from the following link: https://archive.ics.uci.edu/ml/datasets/Breast+Cancer+Wisconsin+(Diagnostic)"
+paperlink <- "The dataset can be obtained from the following link: insert link"
+
+
+ui <- dashboardPage(
+  dashboardHeader(title = "Classification: Accurately Diagnosing Breast Cancers Using Machine Learning Models", titleWidth = 800),
+  dashboardSidebar(
+    sidebarMenu(
+      menuItem("Main Results", tabName = "main", icon = icon("chart-bar")),
+      menuItem("Confusion Matrices", tabName = "cm", icon = icon("binoculars")),
+      menuItem("Info", tabName = "info", icon = icon("info"))
+    )
+  ),
+  dashboardBody(
+    tabItems( 
+      tabItem("main",
+              fluidRow(titlePanel("Classification Results by Model Algorithm"),
+                       box(textOutput("intro"), width = 14),
+                       infoBox("Selected Model", "SVM Radial Kernel", width = 3, icon = icon("check-square"), color = "green"),
+                       infoBox("Accuracy Score", "99.12%", width = 3, icon = icon("crosshairs"), color = "green"),
+                       infoBox("Missed Cancer Diagnoses (False Negatives)", "Zero", width = 3, icon = icon("stethoscope"), color = "green")),
+              fluidRow(
+                      
+                      box(plotOutput("statplot"), width = 14),
+                      box(checkboxGroupInput("stat", "Select Models To Display:", selected = c("Decision Tree", "KNN","Logistic Regression","SVM Linear Kernel","SVM Radial Kernel"),
+                                c("Decision Tree", "KNN","Logistic Regression","SVM Linear Kernel","SVM Radial Kernel" ))),
+                        bsTooltip(id = "statplot", title = "Use the model selection below to select which models to display in the graph", 
+                                 placement = "left", trigger = "hover")
+                     ),
+              fluidRow(box(textOutput("table"), width = 14),
+                dataTableOutput("data")
+              )
+           
+        ),
+      
+      tabItem("cm",
+              column(width = 12,
+                     fluidRow(titlePanel("Confusion Matrices For Classification Models"),
+                              box(textOutput("subtitlecm"), width = 14),
+                       column(width = 6,
+                              box(plotOutput("cm1"), width = 12, title = "Decision Tree", collapsible = TRUE, collapsed = TRUE),
+                              bsTooltip(id = "cm1", title = "The Decision tree algorithm achieved 93% Accuracy with 4 False Negatives ", 
+                                 placement = "left", trigger = "hover"),
+                              box(plotOutput("cm2"), width = 12, title = "K Nearest Neighbours", collapsible = TRUE, collapsed = TRUE),
+                              bsTooltip(id = "cm2", title = "The K Nearest Neighbours algorithm achieved 97% Accuracy with 3 False Negatives ", 
+                                 placement = "left", trigger = "hover"),
+                              box(plotOutput("cm3"), width = 12, title = "Logistic Regression", collapsible = TRUE, collapsed = TRUE)),
+                              bsTooltip(id = "cm3", title = "The Logistic Regression algorithm achieved 91% Accuracy with 8 False Negatives ", 
+                                 placement = "left", trigger = "hover"),
+                       column(width = 6,
+                              box(plotOutput("cm4"), width = 12, title = "SVM Linear Kernel", collapsible = TRUE, collapsed = TRUE),
+                              bsTooltip(id = "cm4", title = "The SVM Linear Kernel algorithm achieved 98% Accuracy with 1 False Negative ", 
+                                 placement = "left", trigger = "hover"),
+                              box(plotOutput("cm5"), width = 12, title = "SVM Radial Kernel", collapsible = TRUE, collapsed = TRUE),
+                              bsTooltip(id = "cm5", title = "The SVM Radial Kernel algorithm achieved 99% Accuracy with 0 False Negatives ", 
+                                 placement = "left", trigger = "hover"))
+                       )
+                       )
+                     ),
+      tabItem("info",
+              fluidRow(
+                titlePanel("Info and FAQ"),
+                box(textOutput("author"), width = 14, title = "Author Information", collapsible = TRUE, collapsed = FALSE)
+              ),
+              fluidRow(
+                box(textOutput("about"), width = 14, title = "Abstract", collapsible = TRUE, collapsed = TRUE)
+              ),
+              fluidRow(
+                box(textOutput("more"), width = 14, title = "Tell me more about the study", collapsible = TRUE, collapsed = TRUE)
+              ),
+              fluidRow(
+                box(textOutput("paperlink"), width = 14, title = "Where can I find the paper?", collapsible = TRUE, collapsed = TRUE)
+              ),
+              fluidRow(
+                box(textOutput("datalink"), width = 14, title = "Where can I find the dataset used?", collapsible = TRUE, collapsed = TRUE)
+              
+              
+              
+              )
+              )
+                
+                
+              )
+          )
+)
+      
+      
+    
+      
+
+
+                
+
+server <- function(input, output){
+  output$statplot <- renderPlot({ ggplot(subset(model_stats_long, Model %in% c(input$stat)), aes(x= Model, y =value, fill = variable, label = value  )) + geom_bar(stat = 'identity', position = "dodge") + theme_grey() +  geom_text(position = position_dodge2(width = 0.9, preserve = "single"), angle = 90, vjust=0.25, hjust=2)+
+  theme(axis.text.x=element_text(angle=90, hjust=1, size=10)) + ylab("Score in %") +
+  ggtitle("Model Accuracy, Sensitivity and Specificity Results (%)")
+  
+  })
+  output$intro <- renderText(intro)
+  output$subtitlecm <- renderText(subtitlecm)
+  output$cm1 <- renderPlot(dtree_cm_plot)
+  output$cm2 <- renderPlot(knn_cm_plot)
+  output$cm3 <- renderPlot(lr_cm_plot)
+  output$cm4 <- renderPlot(svml_cm_plot)
+  output$cm5 <- renderPlot(svmr_cm_plot)
+  output$data <- renderDataTable(dataset_binary)
+  output$table <- renderText(table_desc)
+  output$about <- renderText(about_desc)
+  output$more <- renderText(more)
+  output$author <- renderText(author)
+  output$paperlink <- renderText(paperlink)
+  output$datalink <- renderText(datalink)
+}
+
+shinyApp(ui, server)
+
+```
+
+```{r}
+library(lobstr)
+mem_used()
+```
+

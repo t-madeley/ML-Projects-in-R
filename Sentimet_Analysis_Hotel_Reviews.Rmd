@@ -1,0 +1,1009 @@
+---
+title: "Sentiment Analysis Thomas Madeley"
+output: html_notebook
+---
+
+```{r}
+knitr::opts_knit$set(root.dir = rprojroot::find_rstudio_root_file())
+```
+
+
+Sentiment analysis
+
+
+Importing the libraries:
+
+Importing the dataset:
+
+Insepcting the dateset:
+
+```{r}
+library(tm)
+library(wordcloud)
+
+Reviews <- read.csv("C:/Users/tom/Desktop/University Work/ASDM CourseWork/Sentiment Analysis/hotel_reviews.csv", header = TRUE)
+
+names(Reviews)
+head(Reviews)
+tail(Reviews)
+summary(Reviews)
+str(Reviews)
+dim(Reviews) 
+
+```
+
+Seperating the reviews by Hotel.Restaurant.name in order to create a unique dataset for each of the selected values of Hotel.Restaurant.name (Hotel or Restaurant):
+
+Using dplyr's 'distinct' function to find the unique values of Hotel.Restaurant.name
+
+
+```{r}
+unique(Reviews["Hotel.Restaurant.name"])
+#537 unique hotels
+```
+
+Deciding on the criteria for selecting the 20 hotels for analysis:
+
+Average length of review: greater length of review will give more sentiment to analyse.
+
+Number of reviews: more reviews will reduce misclassications due to a review perhaps written in strange vocabulary.
+
+When inspecting the dataset it is clear that many of the reviews are duplicated. I will remove the duplicate reviews and reassess which hotels have over 100 reviews. The distinct function in base R will be used. Nearly 4000 rows have been removed due to the review being identical. 53644 -> 49938
+
+
+
+```{r}
+library(dplyr)
+Reviews_grouped <- Reviews %>% group_by(Hotel.Restaurant.name, Location)
+Reviews_grouped <- Reviews_grouped %>% summarise(No_of_reviews = n_distinct(Review))
+Reviews_grouped_sorted <- arrange(Reviews_grouped,desc(No_of_reviews))
+head(Reviews_grouped_sorted, 20)
+
+Reviews_no_dup <- Reviews %>% distinct(Review, .keep_all = TRUE)
+
+Reviews_grouped <- Reviews_no_dup %>% group_by(Hotel.Restaurant.name, Location)
+Reviews_grouped <- Reviews_grouped %>% summarise(No_of_reviews = n_distinct(Review))
+Reviews_grouped_sorted <- arrange(Reviews_grouped,desc(No_of_reviews))
+head(Reviews_grouped_sorted, 20)
+
+```
+
+We can see that a large number of hotels have at least 100 reviews with the top 6 having between 100 and 200 reviews.
+
+I will find reviews with a longer average review length with at least 100 reviews. - 381 of 537 hotels. 
+
+
+Creating a list of hotel/ Restaurant names with over 100 reviews.
+
+
+```{r}
+
+Reviews_over_100 <- filter(Reviews_grouped_sorted, No_of_reviews >= 100)
+Reviews_over_100
+
+hotel_names_100 <- Reviews_over_100$Hotel.Restaurant.name
+
+```
+
+
+Filtering the original database to have only Hotels and Restaurants with over 100 reviews:
+
+Using dplyr's filter function with the %in% filter to determine whether the hotel/restaurant name is in the list containing names of hotels/restaurants of over 100 reviews. 
+
+
+```{r}
+Reviews_over_100 <- filter(Reviews, Hotel.Restaurant.name %in% hotel_names_100)
+Reviews_over_100
+```
+
+I will split 20 selected hotels into two locations, this means percentage of positive and negative reviews over two locations can be compared. 
+
+The two locations will need to have at least ten hotel/restaurants with over 100 reviews. Checking this with a group_by and summarise:
+
+```{r}
+grouped_location <- Reviews_over_100 %>% group_by(Location) %>% summarise(n_distinct(Hotel.Restaurant.name))
+grouped_location
+```
+
+
+
+Remove punctuation, grammar etc
+
+
+Patong will be selected as it has the most Hotels and Restaurants with over 100 reviews. This would imply that it is the most popular and established destination.
+
+The second destination will be Karon. This location still has a significant number of Hotels and Restaurants with over 100 reviews and is geographically the closest town in the database. 
+
+
+Attempting to run the filter on the location and it returned no results. Upon printing the location column, I discovered that there is a space infront of each location name. I quickly used the gsub function to remove the leading blank space using the 'trimws' function. 
+
+Writing the the dataframes to CSV for future use.
+
+
+```{r}
+
+Reviews_over_100$Location <- trimws(Reviews_over_100$Location, which = c("left"))
+
+patong_reviews <-  filter(Reviews_over_100, Location == "Patong")
+patong_reviews
+
+
+
+karon_reviews <- filter(Reviews_over_100, Location == "Karon")
+karon_reviews
+
+
+
+```
+
+ 
+
+
+Now with the two new dataframes containing only Hotels and Restaurants with over 100 reviews, in Patong and Karon the average review length will now be investigated. 
+
+It can be seen that the the mean review length ranges from 241 to 167 characters. The top ten hotels/restaurants by mean_length will be selected by arranging the output in descending order by mean character length. 
+
+Creating a listing of ten hotels/restaurants for both locations that will be selected. 
+
+
+```{r}
+top_patong_length<-patong_reviews %>% group_by(Hotel.Restaurant.name, Location) %>% summarise(mean_length = mean(nchar(Review))) %>% arrange(desc(mean_length))
+top_karon_length <- karon_reviews %>% group_by(Hotel.Restaurant.name, Location) %>% summarise(mean_length = mean(nchar(Review))) %>% arrange(desc(mean_length))
+
+top_patong_length <- head(top_patong_length,10)
+top_karon_length<- head(top_karon_length, 10)
+
+top_patong_names <- top_patong_length$Hotel.Restaurant.name
+top_karon_names <- top_karon_length$Hotel.Restaurant.name
+top_karon_length
+top_patong_length
+
+```
+Creating new datasets using the list of names of top hotels:
+
+Inspecting both dataframes we can see that both sets have 1000 rows, meaning each hotel/restaurant has 100 reviews.
+
+```{r}
+patong_reviews_10 <- filter(patong_reviews, Hotel.Restaurant.name %in% top_patong_names)
+
+karon_reviews_10 <- filter(karon_reviews, Hotel.Restaurant.name %in% top_karon_names)
+
+
+
+#Looping back into data preprocessing as line breaks remain in reviews, causing issues in importing into SAS
+
+
+patong_reviews_10$Review <- gsub("[\r\n]", "", patong_reviews_10$Review)
+patong_reviews_10$Review<- gsub("ãâ‚â„+", "", patong_reviews_10$Review)
+patong_reviews_10$Review<- gsub("â€™", "", patong_reviews_10$Review)
+patong_reviews_10$Review<- gsub("â","", patong_reviews_10$Review)
+patong_reviews_10$Review<- gsub("€","", patong_reviews_10$Review)
+patong_reviews_10$Review<- gsub("œ","", patong_reviews_10$Review)
+patong_reviews_10$Review<- gsub("œ","", patong_reviews_10$Review)
+karon_reviews_10
+
+
+
+#Wrting to csv for SAS use
+write.csv(patong_reviews_10,"C:/Users/Tom/Desktop/University Work/ASDM CourseWork/Sentiment Analysis SAS/patong_reviews_10.csv",)
+
+```
+
+The hotels selected must be active. Active will be defined as having a review within the last month of the dataframe: Contains a review from April 2018 OR contains a review without a date ( Yesterday, 4 weeks ago etc).
+
+Using group_by and summarise to create a grouped dataframe with a logical column returning true of false if there is a review with a Review.Date containing 'ago' meaning that review was posted within the last 4 weeks of the datasets final date. 
+
+Then running a second summarise function the 'any' function that will test whether any value in that column is TRUE meaning that that particular Hotel or Restaurant is active. 
+
+
+```{r}
+library(stringr)
+active_status_patong <- patong_reviews_10 %>% group_by(Hotel.Restaurant.name) %>% summarise(Active = str_detect(Review.Date, "ago")) %>% summarise ("Active Status" = any(Active))
+
+active_status_patong
+
+active_status_karon <- karon_reviews_10 %>% group_by(Hotel.Restaurant.name) %>% summarise(Active = str_detect(Review.Date, "ago")) %>% summarise ("Active Status" = any(Active))
+
+active_status_karon
+```
+All of the selected patong hotels are 'Active'. Unfortunately the 2gether Restaurant from the Karon dataset is not active. It will be rejected and another Hotel/Restaurant will be selected.
+
+Writing the new dataframe to csv for use in SAS
+
+```{r}
+top_karon_length_11 <- karon_reviews %>% group_by(Hotel.Restaurant.name, Location) %>% summarise(mean_length = mean(nchar(Review))) %>% arrange(desc(mean_length))
+
+top_karon_names_11<- head(top_karon_length_11,n=11)# as the rejected hotel is in the top 10 reseults, the top 11 results will be selected 
+top_karon_names_11
+
+top_karon_names_11 <- top_karon_names_11$Hotel.Restaurant.name #writing the top 11 names to the list of names
+length(top_karon_names_11)
+top_karon_names_11 <- top_karon_names_11[-7] #removing the 7th item in the list which is the 2getherRestaurant which is not active
+karon_reviews_11 <- filter(karon_reviews, Hotel.Restaurant.name %in% top_karon_names_11)                
+karon_reviews_11
+#Writing to csv for SAS use
+#write.csv(karon_reviews_11,"C:\\Users\\Tom\\Desktop\\University Work\\ASDM CourseWork\\Sentiment Analysis SAS\\karon_reviews_11.csv")
+
+```
+
+Rechecking the active status for the Karon Hotels/ Restaurants
+
+
+```{r}
+active_status_karon <- karon_reviews_11 %>% group_by(Hotel.Restaurant.name) %>% summarise(Active = str_detect(Review.Date, "ago")) %>% summarise ("Active Status" = any(Active))
+
+active_status_karon
+
+```
+Now all of the Hotels/ restaurants are active and the analysis can be continued.
+
+The next step is to prepare the reviews column by removing punctuation and building the corpuses. 
+
+To do this a dataset for each hotel/restaurant will be created using the split function and a lapply function will be used to iterate over the Hotel/Restaurant names and 
+
+
+```{r}
+top_patong_names
+top_karon_names_11
+
+
+library(tidyverse)
+
+
+
+# Split by Hotel.Restaurant.name
+patong_split <- split(patong_reviews_10, patong_reviews_10$Hotel.Restaurant.name)
+
+# Saving them as a csv with a comma seperator
+lapply(names(patong_split), function(x){
+    write_csv(patong_split[[x]], path = paste(x, ".csv", sep = ","))
+    })
+
+
+
+# Split by Hotel.Restaurant.name
+karon_split <- split(karon_reviews_11, karon_reviews_11$Hotel.Restaurant.name)
+
+# Saving them as a csv with a comma seperator
+lapply(names(karon_split), function(x){
+    write_csv(karon_split[[x]], path = paste(x, ".csv", sep = ","))
+    })
+
+
+
+```
+Importing the individual dataframes:
+
+```{r}
+patong_1 <- read.csv("Ao Chalong Yacht Club Restaurant.csv", header =TRUE)
+patong_2 <- read.csv("Baan Rim Pa Patong.csv", header =TRUE)
+patong_3 <- read.csv("Climax on Bangla.csv", header =TRUE)
+patong_4 <- read.csv("K-Hotel Restaurant and Beer Garden.csv", header =TRUE)
+patong_5 <- read.csv("Kokosnuss.csv", header =TRUE)
+patong_6 <- read.csv("La Dolce Vita Restaurant.csv", header =TRUE)
+patong_7 <- read.csv("La Gritta.csv", header =TRUE)
+patong_8 <- read.csv("Poo Nurntong Restaurant.csv", header =TRUE)
+patong_9 <- read.csv("Sizzle Rooftop Restaurant.csv", header =TRUE)
+patong_10 <- read.csv("Tunk-Ka Cafe.csv", header =TRUE)
+
+karon_1 <- read.csv("Da Mario Karon.csv", header =TRUE)
+karon_2 <- read.csv("El Gaucho Steakhouse.csv", header =TRUE)
+karon_3 <- read.csv("Ging Restaurant.csv", header =TRUE)
+karon_4 <- read.csv("Kalika 76 Restaurant.csv", header =TRUE)
+karon_5 <- read.csv("O-Oh Farm Karon.csv", header =TRUE)
+karon_6 <- read.csv("PaPa Restaurant.csv", header =TRUE)
+karon_7 <- read.csv("Sabaijai Cafe.csv", header =TRUE)
+karon_8 <- read.csv("Schlusslicht.csv", header =TRUE)
+karon_9 <- read.csv("Tandoori Flames.csv", header =TRUE)
+karon_10 <- read.csv("The Palm Cuisine.csv", header =TRUE)
+head(patong_1)
+```
+
+Now that all of the dataframes are imported the process of cleaning the reviews and creating text vectors and convert to lowercase:
+
+
+```{r}
+patong_1<- tolower(patong_1$Review)
+patong_2<- tolower(patong_2$Review)
+patong_3<- tolower(patong_3$Review)
+patong_4<- tolower(patong_4$Review)
+patong_5<- tolower(patong_5$Review)
+patong_6<- tolower(patong_6$Review)
+patong_7<- tolower(patong_7$Review)
+patong_8<- tolower(patong_8$Review)
+patong_9<- tolower(patong_9$Review)
+patong_10<- tolower(patong_10$Review)
+
+patong_overall <- tolower(patong_reviews_10$Review)
+
+karon_1<- tolower(karon_1$Review)
+karon_2<- tolower(karon_2$Review)
+karon_3<- tolower(karon_3$Review)
+karon_4<- tolower(karon_4$Review)
+karon_5<- tolower(karon_5$Review)
+karon_6<- tolower(karon_6$Review)
+karon_7<- tolower(karon_7$Review)
+karon_8<- tolower(karon_8$Review)
+karon_9<- tolower(karon_9$Review)
+karon_10<- tolower(karon_10$Review)
+
+karon_overall <- tolower(karon_reviews_11$Review)
+
+
+```
+
+
+Removing hyperlinks and URLS from the reviews:
+
+```{r}
+patong_1<- gsub("http\\S+\\s*", "", patong_1)
+patong_2<- gsub("http\\S+\\s*", "", patong_2)
+patong_3<- gsub("http\\S+\\s*", "", patong_3)
+patong_4<- gsub("http\\S+\\s*", "", patong_4)
+patong_5<- gsub("http\\S+\\s*", "", patong_5)
+patong_6<- gsub("http\\S+\\s*", "", patong_6)
+patong_7<- gsub("http\\S+\\s*", "", patong_7)
+patong_8<- gsub("http\\S+\\s*", "", patong_8)
+patong_9<- gsub("http\\S+\\s*", "", patong_9)
+patong_10<- gsub("http\\S+\\s*", "", patong_10)
+
+patong_overall<- gsub("http\\S+\\s*", "", patong_overall)
+
+karon_1<- gsub("http\\S+\\s*", "", karon_1)
+karon_2<- gsub("http\\S+\\s*", "", karon_2)
+karon_3<- gsub("http\\S+\\s*", "", karon_3)
+karon_4<- gsub("http\\S+\\s*", "", karon_4)
+karon_5<- gsub("http\\S+\\s*", "", karon_5)
+karon_6<- gsub("http\\S+\\s*", "", karon_6)
+karon_7<- gsub("http\\S+\\s*", "", karon_7)
+karon_8<- gsub("http\\S+\\s*", "", karon_8)
+karon_9<- gsub("http\\S+\\s*", "", karon_9)
+karon_10<- gsub("http\\S+\\s*", "", karon_10)
+
+karon_overall<- gsub("http\\S+\\s*", "", karon_overall)
+
+```
+Removing Punctuation from reviews:
+
+```{r}
+patong_1<- gsub("[[:punct:]]", "", patong_1)
+patong_2<- gsub("[[:punct:]]", "", patong_2)
+patong_3<- gsub("[[:punct:]]", "", patong_3)
+patong_4<- gsub("[[:punct:]]", "", patong_4)
+patong_5<- gsub("[[:punct:]]", "", patong_5)
+patong_6<- gsub("[[:punct:]]", "", patong_6)
+patong_7<- gsub("[[:punct:]]", "", patong_7)
+patong_8<- gsub("[[:punct:]]", "", patong_8)
+patong_9<- gsub("[[:punct:]]", "", patong_9)
+patong_10<- gsub("[[:punct:]]", "", patong_10)
+
+patong_overall<- gsub("[[:punct:]]", "", patong_overall)
+
+karon_1<- gsub("[[:punct:]]", "", karon_1)
+karon_2<- gsub("[[:punct:]]", "", karon_2)
+karon_3<- gsub("[[:punct:]]", "", karon_3)
+karon_4<- gsub("[[:punct:]]", "", karon_4)
+karon_5<- gsub("[[:punct:]]", "", karon_5)
+karon_6<- gsub("[[:punct:]]", "", karon_6)
+karon_7<- gsub("[[:punct:]]", "", karon_7)
+karon_8<- gsub("[[:punct:]]", "", karon_8)
+karon_9<- gsub("[[:punct:]]", "", karon_9)
+karon_10<- gsub("[[:punct:]]", "", karon_10)
+
+karon_overall<- gsub("[[:punct:]]", "", karon_overall)
+
+```
+
+Remove digits from the reviews:
+
+```{r}
+patong_1<- gsub("[[:digit:]]",  "", patong_1)
+patong_2<- gsub("[[:digit:]]",  "", patong_2)
+patong_3<- gsub("[[:digit:]]",  "", patong_3)
+patong_4<- gsub("[[:digit:]]", "", patong_4)
+patong_5<- gsub("[[:digit:]]", "", patong_5)
+patong_6<- gsub("[[:digit:]]", "", patong_6)
+patong_7<- gsub("[[:digit:]]", "", patong_7)
+patong_8<- gsub("[[:digit:]]", "", patong_8)
+patong_9<- gsub("[[:digit:]]", "", patong_9)
+patong_10<- gsub("[[:digit:]]", "", patong_10)
+
+
+patong_overall<- gsub("[[:digit:]]", "", patong_overall)
+
+karon_1<- gsub("[[:digit:]]", "", karon_1)
+karon_2<- gsub("[[:digit:]]", "", karon_2)
+karon_3<- gsub("[[:digit:]]", "", karon_3)
+karon_4<- gsub("[[:digit:]]", "", karon_4)
+karon_5<- gsub("[[:digit:]]", "", karon_5)
+karon_6<- gsub("[[:digit:]]", "", karon_6)
+karon_7<- gsub("[[:digit:]]", "", karon_7)
+karon_8<- gsub("[[:digit:]]", "", karon_8)
+karon_9<- gsub("[[:digit:]]", "", karon_9)
+karon_10<- gsub("[[:digit:]]", "", karon_10)
+
+karon_overall<- gsub("[[:digit:]]", "", karon_overall)
+
+```
+Removing the blank spaces from the end of the reivews:
+
+```{r}
+patong_1<- gsub(" $", "", patong_1)
+patong_2<- gsub(" $", "", patong_2)
+patong_3<- gsub(" $", "", patong_3)
+patong_4<- gsub(" $", "", patong_4)
+patong_5<- gsub(" $","", patong_5)
+patong_6<- gsub(" $","", patong_6)
+patong_7<- gsub(" $","", patong_7)
+patong_8<- gsub(" $","", patong_8)
+patong_9<- gsub(" $","", patong_9)
+patong_10<- gsub(" $","", patong_10)
+
+patong_overall<- gsub(" $", "", patong_overall)
+
+karon_1<- gsub(" $","", karon_1)
+karon_2<- gsub(" $","", karon_2)
+karon_3<- gsub(" $","", karon_3)
+karon_4<- gsub(" $","", karon_4)
+karon_5<- gsub(" $","", karon_5)
+karon_6<- gsub(" $","", karon_6)
+karon_7<- gsub(" $","", karon_7)
+karon_8<- gsub(" $","", karon_8)
+karon_9<- gsub(" $","", karon_9)
+karon_10<- gsub(" $","", karon_10)
+
+karon_overall<- gsub(" $", "", karon_overall)
+
+
+```
+
+Removing non alpha numeric characters example(â,€,™) and removing line breaks ("\n")
+
+```{r}
+
+patong_1<- gsub("[\r\n]", "", patong_1)
+patong_1<- gsub("â€™", "", patong_1)
+patong_1<- gsub("ãâ‚â„+", "", patong_1)
+patong_2<- gsub("[\r\n]", "", patong_2)
+patong_2<- gsub("ãâ‚â„+", "", patong_2)
+patong_3<- gsub("[\r\n]", "", patong_3)
+patong_3<- gsub("ãâ‚â„+", "", patong_3)
+patong_4<- gsub("[\r\n]", "", patong_4)
+patong_4<- gsub("ãâ‚â„+", "", patong_4)
+patong_5<- gsub("[\r\n]", "", patong_5)
+patong_5<- gsub("ãâ‚â„+", "", patong_5)
+patong_6<- gsub("[\r\n]", "", patong_6)
+patong_6<- gsub("ãâ‚â„+", "", patong_6)
+patong_7<- gsub("[\r\n]", "", patong_7)
+patong_7<- gsub("ãâ‚â„+", "", patong_7)
+patong_8<- gsub("[\r\n]", "", patong_8)
+patong_8<- gsub("ãâ‚â„+", "", patong_8)
+patong_9<- gsub("[\r\n]", "", patong_9)
+patong_9<- gsub("ãâ‚â„+", "", patong_9)
+patong_10<- gsub("[\r\n]", "", patong_10)
+patong_10<- gsub("ãâ‚â„+", "", patong_10)
+#Revisiting due to issues with SAS import
+patong_overall<- gsub("[\r\n]", "", patong_overall)
+patong_overall<- gsub("ãâ‚â„+", "", patong_overall)
+patong_overall<- gsub("â€™", "", patong_overall)
+patong_overall<- gsub("€", "", patong_overall)
+patong_overall<- gsub("â", "", patong_overall)
+patong_overall<- gsub("œ", "", patong_overall)
+
+write.csv(patong_overall, "C:\\Users\\Tom\\Desktop\\University Work\\ASDM CourseWork\\Sentiment Analysis SAS\\patong_reviews_10.csv" )
+
+karon_1<- gsub("[\r\n]", "", karon_1)
+karon_1<- gsub("ãâ‚â„+", "", karon_1)
+karon_2<- gsub("[\r\n]", "", karon_2)
+karon_2<- gsub("ãâ‚â„+", "", karon_2)
+karon_3<- gsub("[\r\n]", "", karon_3)
+karon_3<- gsub("ãâ‚â„+", "", karon_3)
+karon_4<- gsub("[\r\n]", "", karon_4)
+karon_4<- gsub("ãâ‚â„+", "", karon_4)
+karon_5<- gsub("[\r\n]", "", karon_5)
+karon_5<- gsub("ãâ‚â„+", "", karon_5)
+karon_6<- gsub("[\r\n]", "", karon_6)
+karon_6<- gsub("ãâ‚â„+", "", karon_6)
+karon_7<- gsub("[\r\n]", "", karon_7)
+karon_7<- gsub("ãâ‚â„+", "", karon_7)
+karon_8<- gsub("[\r\n]", "", karon_8)
+karon_8<- gsub("ãâ‚â„+", "", karon_8)
+karon_9<- gsub("[\r\n]", "", karon_9)
+karon_9<- gsub("ãâ‚â„+", "", karon_9)
+karon_10<- gsub("[\r\n]", "", karon_10)
+karon_10<- gsub("ãâ‚â„+", "", karon_10)
+
+karon_overall<- gsub("[\r\n]", "", karon_overall)
+karon_overall<- gsub("ãâ‚â„+", "", karon_overall)
+karon_overall<- gsub("â€™", "", karon_overall)
+karon_overall<- gsub("€", "", karon_overall)
+karon_overall<- gsub("â", "", karon_overall)
+karon_overall<- gsub("œ", "", karon_overall)
+karon_overall<- gsub("ã", "a", karon_overall) #replaced with a as only appears in valid words
+karon_overall<- gsub("^\\s\\w_+", "", karon_overall)
+head(karon_overall)
+
+write.csv(karon_overall, "C:\\Users\\Tom\\Desktop\\University Work\\ASDM CourseWork\\Sentiment Analysis SAS\\karon_reviews_11.csv" )
+```
+
+
+
+Converting the cleaned reviews into corpora:
+
+```{r}
+corpus_patong_1<- Corpus(VectorSource(patong_1))
+corpus_patong_2<- Corpus(VectorSource(patong_2))
+corpus_patong_3<-Corpus(VectorSource(patong_3))
+corpus_patong_4<- Corpus(VectorSource(patong_4))
+corpus_patong_5<- Corpus(VectorSource(patong_5))
+corpus_patong_6<- Corpus(VectorSource(patong_6))
+corpus_patong_7<- Corpus(VectorSource(patong_7))
+corpus_patong_8<- Corpus(VectorSource(patong_8))
+corpus_patong_9<- Corpus(VectorSource(patong_9))
+corpus_patong_10<- Corpus(VectorSource(patong_10))
+
+corpus_patong_overall<- Corpus(VectorSource(patong_overall))
+
+corpus_karon_1<- Corpus(VectorSource(karon_1))
+corpus_karon_2<- Corpus(VectorSource(karon_2))
+corpus_karon_3<- Corpus(VectorSource(karon_3))
+corpus_karon_4<- Corpus(VectorSource(karon_4))
+corpus_karon_5<- Corpus(VectorSource(karon_5))
+corpus_karon_6<- Corpus(VectorSource(karon_6))
+corpus_karon_7<- Corpus(VectorSource(karon_7))
+corpus_karon_8<- Corpus(VectorSource(karon_8))
+corpus_karon_9<- Corpus(VectorSource(karon_9))
+corpus_karon_10<- Corpus(VectorSource(karon_10))
+
+
+corpus_karon_overall<- Corpus(VectorSource(karon_overall))
+
+
+
+```
+Cleaning the corpus by removing stop words and whitespace:
+#Transformations drops documents warning can be ignored, it occurs when creating a corpus from a vector source.
+```{r}
+corpus_patong_1 <- tm_map(corpus_patong_1, removeWords,stopwords("english"))
+corpus_patong_1 <- tm_map(corpus_patong_1, stripWhitespace)
+corpus_patong_2 <- tm_map(corpus_patong_2, removeWords,stopwords("english"))
+corpus_patong_2 <- tm_map(corpus_patong_2, stripWhitespace)
+corpus_patong_3 <- tm_map(corpus_patong_3, removeWords,stopwords("english"))
+corpus_patong_3 <- tm_map(corpus_patong_3, stripWhitespace)
+corpus_patong_4 <- tm_map(corpus_patong_4, removeWords,stopwords("english"))
+corpus_patong_4 <- tm_map(corpus_patong_4, stripWhitespace)
+corpus_patong_5 <- tm_map(corpus_patong_5, removeWords,stopwords("english"))
+corpus_patong_5 <- tm_map(corpus_patong_5, stripWhitespace)
+corpus_patong_6 <- tm_map(corpus_patong_6, removeWords,stopwords("english"))
+corpus_patong_6 <- tm_map(corpus_patong_6, stripWhitespace)
+corpus_patong_7 <- tm_map(corpus_patong_7, removeWords,stopwords("english"))
+corpus_patong_7 <- tm_map(corpus_patong_7, stripWhitespace)
+corpus_patong_8 <- tm_map(corpus_patong_8, removeWords,stopwords("english"))
+corpus_patong_8 <- tm_map(corpus_patong_8, stripWhitespace)
+corpus_patong_9 <- tm_map(corpus_patong_9, removeWords,stopwords("english"))
+corpus_patong_9 <- tm_map(corpus_patong_9, stripWhitespace)
+corpus_patong_10 <- tm_map(corpus_patong_10, removeWords,stopwords("english"))
+corpus_patong_10 <- tm_map(corpus_patong_10, stripWhitespace)
+
+corpus_patong_overall <- tm_map(corpus_patong_overall, removeWords,stopwords("english"))
+corpus_patong_overall <- tm_map(corpus_patong_overall, stripWhitespace)
+
+
+
+corpus_karon_1 <- tm_map(corpus_karon_1, removeWords,stopwords("english"))
+corpus_karon_1 <- tm_map(corpus_karon_1, stripWhitespace)
+corpus_karon_2 <- tm_map(corpus_karon_2, removeWords,stopwords("english"))
+corpus_karon_2 <- tm_map(corpus_karon_2, stripWhitespace)
+corpus_karon_3 <- tm_map(corpus_karon_3, removeWords,stopwords("english"))
+corpus_karon_3 <- tm_map(corpus_karon_3, stripWhitespace)
+corpus_karon_4 <- tm_map(corpus_karon_4, removeWords,stopwords("english"))
+corpus_karon_4 <- tm_map(corpus_karon_4, stripWhitespace)
+corpus_karon_5 <- tm_map(corpus_karon_5, removeWords,stopwords("english"))
+corpus_karon_5 <- tm_map(corpus_karon_5, stripWhitespace)
+corpus_karon_6 <- tm_map(corpus_karon_6, removeWords,stopwords("english"))
+corpus_karon_6 <- tm_map(corpus_karon_6, stripWhitespace)
+corpus_karon_7 <- tm_map(corpus_karon_7, removeWords,stopwords("english"))
+corpus_karon_7 <- tm_map(corpus_karon_7, stripWhitespace)
+corpus_karon_8 <- tm_map(corpus_karon_8, removeWords,stopwords("english"))
+corpus_karon_8 <- tm_map(corpus_karon_8, stripWhitespace)
+corpus_karon_9 <- tm_map(corpus_karon_9, removeWords,stopwords("english"))
+corpus_karon_9 <- tm_map(corpus_karon_9, stripWhitespace)
+corpus_karon_10 <- tm_map(corpus_karon_10, removeWords,stopwords("english"))
+corpus_karon_10 <- tm_map(corpus_karon_10, stripWhitespace)
+
+corpus_karon_overall <- tm_map(corpus_karon_overall, removeWords,stopwords("english"))
+corpus_karon_overall <- tm_map(corpus_karon_overall, stripWhitespace)
+
+
+
+
+
+```
+
+Stemming the words to their root in the corpus:
+
+```{r}
+stem_corpus_patong_1 <- tm_map(corpus_patong_1, stemDocument)
+stem_corpus_patong_2 <- tm_map(corpus_patong_2, stemDocument)
+stem_corpus_patong_3 <- tm_map(corpus_patong_3, stemDocument)
+stem_corpus_patong_4 <- tm_map(corpus_patong_4, stemDocument)
+stem_corpus_patong_5 <- tm_map(corpus_patong_5, stemDocument)
+stem_corpus_patong_6 <- tm_map(corpus_patong_6, stemDocument)
+stem_corpus_patong_7 <- tm_map(corpus_patong_7, stemDocument)
+stem_corpus_patong_8 <- tm_map(corpus_patong_8, stemDocument)
+stem_corpus_patong_9 <- tm_map(corpus_patong_9, stemDocument)
+stem_corpus_patong_10 <- tm_map(corpus_patong_10, stemDocument)
+
+stem_corpus_patong_overall <- tm_map(corpus_patong_overall, stemDocument)
+
+stem_corpus_karon_1 <- tm_map(corpus_karon_1, stemDocument)
+stem_corpus_karon_2 <- tm_map(corpus_karon_2, stemDocument)
+stem_corpus_karon_3 <- tm_map(corpus_karon_3, stemDocument)
+stem_corpus_karon_4 <- tm_map(corpus_karon_4, stemDocument)
+stem_corpus_karon_5 <- tm_map(corpus_karon_5, stemDocument)
+stem_corpus_karon_6 <- tm_map(corpus_karon_6, stemDocument)
+stem_corpus_karon_7 <- tm_map(corpus_karon_7, stemDocument)
+stem_corpus_karon_8 <- tm_map(corpus_karon_8, stemDocument)
+stem_corpus_karon_9 <- tm_map(corpus_karon_9, stemDocument)
+stem_corpus_karon_10 <- tm_map(corpus_karon_10, stemDocument)
+
+stem_corpus_karon_overall <- tm_map(corpus_karon_overall, stemDocument)
+
+
+
+
+```
+
+
+Importing the positive and negative lexicons:
+
+```{r}
+positive_lexicon <- read.csv("C:/Users/Tom/Desktop/University Work/ASDM CourseWork/Sentiment Analysis/positive-lexicon.txt")
+negative_lexicon <- read.csv("C:/Users/Tom/Desktop/University Work/ASDM CourseWork/Sentiment Analysis/negative-lexicon.txt")
+
+```
+
+Creating a sentiment analysis function that will be used to analyse the corpuses:
+
+This function was taken from the ASDM workshop in week 6. It returns a word cloud and then the ratio of positive words to negative words.
+
+It first creates  the word cloud using the word cloud function. Minimum frequency is set to 3, meaning a word must appear at least 3 times to appear in the word cloud. The color pallette is set, random.color = TRUE sets the color for each word in the wordcloud to be random, max.words = 100 sets the maximum number of words to be 100. 
+
+To count the number of number of positive and negative words in each corpus, the function first creates values for total_pos_count, total_neg_count. Pos/Neg_count_vector have been commented out as they were not used in the function.
+
+Next the function uses a for loop to iterate over all of the reviews in the corpus. 
+
+It splits the review into individual words. Then counts the number of positive and negative words in each review. The count for both positive and negative words are then added to the total positive and total negative counts. 
+
+After the for loop, the function calculates the total count of positive and negative words, and percentages of positive and negative words. These are then returned in a dataframe listing the positive and negative count. 
+
+
+
+
+
+```{r}
+
+#Sentiment Function
+sentiment <- function(stem_corpus)
+{
+#generate wordclouds
+wordcloud(stem_corpus,
+ min.freq = 5,
+ colors=brewer.pal(8, "Dark2"),
+ random.color = TRUE,
+ max.words = 100)
+
+#Calculating the count of total positive and negative words in each review
+
+#Create variables and vectors
+total_pos_count <- 0
+total_neg_count <- 0
+#pos_count_vector <- c()
+#neg_count_vector <- c()
+#Calculate the size of the corpus
+size <- length(stem_corpus)
+for(i in 1:size)
+{
+ #All the words in current review
+ corpus_words<- list(strsplit(stem_corpus[[i]]$content, split = " "))
+ #positive words in current review
+
+ pos_count <-length(intersect(unlist(corpus_words), unlist(positive_lexicon)))
+ #negative words in current review
+ neg_count <- length(intersect(unlist(corpus_words), unlist(negative_lexicon)))
+
+ total_pos_count <- total_pos_count + pos_count ## overall positive count
+ total_neg_count <- total_neg_count + neg_count ## overall negative count
+
+}
+#Calculating overall percentage of positive and negative words of all the reviews
+total_pos_count ## overall positive count
+total_neg_count ## overall negative count
+total_count <- total_pos_count + total_neg_count
+overall_positive_percentage <- (total_pos_count*100)/total_count
+overall_negative_percentage <- (total_neg_count*100)/total_count
+overall_positive_percentage ## overall positive percentage
+#Create a dataframe with all the positive and negative reviews
+df<-data.frame(Review_Type=c("Postive","Negative"),
+ Count=c(total_pos_count ,total_neg_count ))
+print(df) #Print
+overall_positive_percentage<-paste("Percentage of Positive Words:",
+round(overall_positive_percentage,2),"%")
+return(overall_positive_percentage)
+}
+
+```
+
+Using the sentiment function on the patong corpus:
+
+```{r}
+sentiment(stem_corpus_patong_1)
+sentiment(stem_corpus_patong_2)
+sentiment(stem_corpus_patong_3)
+sentiment(stem_corpus_patong_4)
+sentiment(stem_corpus_patong_5)
+sentiment(stem_corpus_patong_6)
+sentiment(stem_corpus_patong_7)
+sentiment(stem_corpus_patong_8)
+sentiment(stem_corpus_patong_9)
+sentiment(stem_corpus_patong_10)
+
+sentiment(stem_corpus_patong_overall)
+
+
+sentiment(stem_corpus_karon_1)
+sentiment(stem_corpus_karon_2)
+sentiment(stem_corpus_karon_3)
+sentiment(stem_corpus_karon_4)
+sentiment(stem_corpus_karon_5)
+sentiment(stem_corpus_karon_6)
+sentiment(stem_corpus_karon_7)
+sentiment(stem_corpus_karon_8)
+sentiment(stem_corpus_karon_9)
+sentiment(stem_corpus_karon_10)
+
+ sentiment(stem_corpus_karon_overall)
+
+```
+Analysing percentages results:
+
+```{r}
+library(RColorBrewer)
+
+patong_perc_df <- data.frame(ID = c("P1","P2","P3","P4","P5","P6","P7","P8","P19","P10"), Positive_Review_Percentage =c(87.15,80.95,90.76,88.76,81.5,88.98,81.82,86.23,84.65,84.06))
+patong_perc_df$Location <- "Patong"
+karon_perc_df <- data.frame(ID = c("K1","K2","K3","K4","K5","K6","K7","K8","K9","K10"), Positive_Review_Percentage =c(78.88,81.59,87.55,88.4,91.25,82.51,87.89,81.4,89.59,88.59))
+karon_perc_df$Location <- "Karon"
+merged_data <- rbind(patong_perc_df, karon_perc_df)
+library(ggthemes)
+ggplot(patong_perc_df, aes(x= reorder(ID, -Positive_Review_Percentage),
+                           Positive_Review_Percentage, fill = ID, )) +
+                           geom_bar(stat='identity') +
+                           theme_grey() +
+                           scale_fill_brewer(palette = "Paired")
+
+ggplot(karon_perc_df, aes(x= reorder(ID, -Positive_Review_Percentage),
+                          Positive_Review_Percentage, fill = ID)) +
+                          geom_bar(stat='identity') +
+                          geom_bar(stat='identity') +
+                          theme_grey() + 
+                          scale_fill_brewer(palette = "Paired")
+
+summary(patong_perc_df)
+summary(karon_perc_df)
+
+ggplot(merged_data, aes(Location,Positive_Review_Percentage, color = Location)) +
+    geom_boxplot() + 
+    ggtitle("Venue Reviews Positive Words Percentage, Dotted line indicates Mean") +
+    ylab("Percentage Positive Words") +
+    coord_flip()+
+    stat_summary(fun.y = mean, geom = "errorbar", 
+               aes(ymax = ..y.., ymin = ..y.., group = Location),width = 0.75, linetype = "dashed")
+    
+    
+    
+
+
+```
+
+
+
+
+
+
+
+Word Frequency:
+
+```{r}
+library(reshape2)
+patongTdm <- as.matrix(TermDocumentMatrix(stem_corpus_patong_overall))
+FreqMatP <- data.frame(Word = rownames(patongTdm), 
+                      Freq = rowSums(patongTdm), 
+                      row.names = NULL)
+patongTdm <- arrange(FreqMatP, desc(Freq))
+patongTdm <- head(patongTdm, 20)
+
+karonTdm <- as.matrix(TermDocumentMatrix(stem_corpus_karon_overall))
+FreqMatK <- data.frame(Word = rownames(karonTdm), 
+                      Freq = rowSums(karonTdm), 
+                      row.names = NULL)
+karonTdm <- arrange(FreqMatK, desc(Freq))
+karonTdm <- head(karonTdm, 20)
+patongTdm
+
+#Adding a location column and filling it with the location
+patongTdm$Location <- "Patong"
+karonTdm$Location <- "Karon"
+
+#concatenating data frames together:
+
+bindTdm <- rbind(patongTdm, karonTdm)
+head(df,40)
+
+```
+
+
+Plotting word bar charts
+
+
+```{r}
+
+ggplot(bindTdm, aes(x= reorder(Word, - Freq), Freq, fill = Location)) + 
+    geom_bar(stat="identity", position="dodge") +
+    theme(axis.text.x = element_text(face = "bold", angle = 90))+
+    ggtitle("Highest Frequecy Words Patong and Karon")+
+    xlab("Words (Double Width Bar Means Not Shared Word)")+
+    ylab("Frequency of Use")
+
+
+
+
+                                                                                    
+```
+                                                                                    
+While the above results show us the ratio of positive to negative words, it does not show the ratio of positive to negative reviews overall. For example, a review containing many positive words will skew the results, when in fact this is just one positive review. 
+
+The function will be modified to instead classify the reviews as positive or negative. The criteria for classification as positive will be that there number of positive words is greater than the number of negative words:
+
+"I liked the food and the staff were great but the view was bad" -> positive
+"The food was awful and but the staff were friendly" -> negative
+
+
+```{r}
+sentiment_class <- function(stem_corpus)
+{
+
+#Calculating the count of total positive and negative words in each review
+
+#Create variables and vectors
+total_pos_review <- 0
+total_neg_review <- 0
+#pos_count_vector <- c()
+#neg_count_vector <- c()
+#Calculate the size of the corpus
+size <- length(stem_corpus)
+for(i in 1:size)
+{
+ #All the words in current review
+ corpus_words<- list(strsplit(stem_corpus[[i]]$content, split = " "))
+ #positive words in current review
+
+ pos_count <-length(intersect(unlist(corpus_words), unlist(positive_lexicon)))
+ #negative words in current review
+ neg_count <- length(intersect(unlist(corpus_words), unlist(negative_lexicon)))
+
+ if (pos_count > neg_count)
+
+ total_pos_review <- total_pos_review + 1
+ 
+ else
+ total_neg_review <- total_neg_review +1
+
+}
+#Calculating overall percentage of positive and negative  reviews
+total_pos_review ## overall positive count
+total_neg_review ## overall negative count
+total_count <- total_pos_review + total_neg_review
+overall_positive_percentage <- (total_pos_review*100)/total_count
+
+overall_positive_percentage ## overall positive percentage
+#Create a dataframe with all the positive and negative reviews
+df<-data.frame(Review_Type=c("Postive","Negative"),
+ Count=c(total_pos_review ,total_neg_review ))
+
+
+overall_positive_percentage<-paste("Percentage of Positive Reviews:",
+round(overall_positive_percentage,2),"%")
+print(overall_positive_percentage)
+
+return(df)
+}
+
+
+```
+
+
+```{r}
+sentiment_class(stem_corpus_patong_1)
+sentiment_class(stem_corpus_patong_2)
+sentiment_class(stem_corpus_patong_3)
+sentiment_class(stem_corpus_patong_4)
+sentiment_class(stem_corpus_patong_5)
+sentiment_class(stem_corpus_patong_6)
+sentiment_class(stem_corpus_patong_7)
+sentiment_class(stem_corpus_patong_8)
+sentiment_class(stem_corpus_patong_9)
+sentiment_class(stem_corpus_patong_10)
+
+patong_results <- sentiment_class(stem_corpus_patong_overall)
+
+sentiment_class(stem_corpus_karon_1)
+sentiment_class(stem_corpus_karon_2)
+sentiment_class(stem_corpus_karon_3)
+sentiment_class(stem_corpus_karon_4)
+sentiment_class(stem_corpus_karon_5)
+sentiment_class(stem_corpus_karon_6)
+sentiment_class(stem_corpus_karon_7)
+sentiment_class(stem_corpus_karon_8)
+sentiment_class(stem_corpus_karon_9)
+sentiment_class(stem_corpus_karon_10)
+
+karon_results<- sentiment_class(stem_corpus_karon_overall)
+```
+
+From the sentiment classifier it can be seen that karon has overall slightly more positive reviews on average with 82.6% positive. Taking the summary statistics from a database of all of the results we can see that the  means are very similar. The IQR is larger for Karon (11 to 7) but the Range is smaller(19 to 20). It could be argued that on the basis of the smaller IQR you are more likely to have a positive experience in Patong. Conversely you may also have the worst experience in Patong as it contains the venue with the minimum review percentage. You may also have the best experience in Karon, as the Maximum value is located there. 
+
+
+
+
+
+```{r}
+library(RColorBrewer)
+
+patong_perc_df <- data.frame(ID = c("P1","P10","P2","P3","P4","P5","P6","P7","P8","P9"), Positive_Review_Percentage =c(86,79,89,87,76,86,69,81,79,80))
+patong_perc_df$Location <- "Patong"
+karon_perc_df <- data.frame(ID = c("K1","K2","K3","K4","K5","K6","K7","K8","K9","K10"), Positive_Review_Percentage =c(75,74,83,91,93,76,86,75,86,82.6))
+karon_perc_df$Location <- "Karon"
+merged_data <- rbind(patong_perc_df, karon_perc_df)
+
+library(ggthemes)
+ggplot(patong_perc_df, aes(x= reorder(ID, -Positive_Review_Percentage),
+                           Positive_Review_Percentage, fill = ID, )) +
+                           geom_bar(stat='identity') +
+                           theme_grey() +
+                           scale_fill_brewer(palette = "Paired")
+
+ggplot(karon_perc_df, aes(x= reorder(ID, -Positive_Review_Percentage),
+                          Positive_Review_Percentage, fill = ID)) +
+                          geom_bar(stat='identity') +
+                          geom_bar(stat='identity') +
+                          theme_grey() + 
+                          scale_fill_brewer(palette = "Paired")
+
+summary(patong_perc_df)
+summary(karon_perc_df)
+
+ggplot(merged_data, aes(Location,Positive_Review_Percentage, color = Location)) +
+    geom_boxplot() + 
+    ggtitle("Venue Reviews Positive Reviews Percentage, Dotted line indicates Mean") +
+    ylab("Percentage Positive reviews") +
+    coord_flip()+
+    stat_summary(fun.y = mean, geom = "errorbar", 
+               aes(ymax = ..y.., ymin = ..y.., group = Location),width = 0.75, linetype = "dashed")
+
+```
+
+
+
+```{r}
+citation("ggplot2")
+citation("stringr")
+citation("dplyr")
+citation("wordcloud")
+citation("tibble")
+citation("ggthemes")
+```
+
+
+
+

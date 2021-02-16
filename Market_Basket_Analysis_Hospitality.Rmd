@@ -1,0 +1,538 @@
+---
+title: "ADSM Courseowork -  APRIORI Market Basket Analysis"
+author: "Thomas Madeley"
+date: "12/11/2020"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+First of all I set the working directory to my coursework folder. 
+
+
+Importing the CSV file and inspecting the data:
+'Head' to inspect the first few rows and column names
+nrow to inspect the number of rows, also to check all rows from the csv has been read correctly
+
+
+
+
+```{r}
+library(dplyr)
+setwd("C:/Users/Tom/Desktop/University Work/ASDM CourseWork/Apriori")
+dive_data <- read.csv('Dive_raw_receipt_data.csv', header = TRUE)
+head(dive_data)
+nrow(dive_data)
+summary(dive_data)
+
+```
+Converting Creation_Date from character to date format. This will allow filtering of values outside of the scope of this analysis. We cannot consider this a temporal dataset, as transactions are ID'd by the receipt number and not by the customer number. 
+
+```{r}
+library(stringr)
+
+
+#splitting the Creation_Date column at the space using the stringr library. Only the date is relevant, the time will be discarded. This will output a character matrix with 2 columns, the first will contain the dates as a string, the second will contain the time as a string
+split_date_time <- str_split_fixed(dive_data$Creation_Date, " ", 2)
+
+
+#Overwriting the Creation_Date column with the string of dates excluding the time:
+
+dive_data$Creation_Date <- split_date_time[,1] 
+
+
+#Converting the Creation_Date column into date format:
+
+dive_data$Creation_Date <- as.Date(dive_data$Creation_Date,"%d/%m/%Y")
+
+head(dive_data)
+
+#Now rows will be able to be filtered by date. 
+```
+
+
+Filtering the rows to remove unnecessary data:
+We only need:
+ 24/09/2020 - 1/11/2020
+ products that were purchased: Not 'discount' products, price > 0 , not a 'selector' product, unknown products
+Selection product 'Single or Double', 'Courses':
+Discounts products
+Unknown products
+Date outside of scope
+ 
+ using library lubridate to filter dates
+ using stringr 'str_detect', negate=TRUE to include non matching elements
+ using dplyr filter function
+```{r}
+
+library(dplyr)
+library(lubridate)
+#simple filter to remove discount category, unknowns and date after opening date
+dive_data <- filter(dive_data, Category_Type != "Discounts" & Category_Type != "Unknown" & Creation_Date >= as.Date("2020-09-24"), Creation_Date < as.Date("2020-11-01"))
+
+#removing 'single or double' selections
+dive_data <- dive_data[str_detect(dive_data$Name, "or", negate=TRUE), ] 
+
+#removing 'Sunday set menu' Selections:
+dive_data <- dive_data[str_detect(dive_data$Name, "Course", negate=TRUE), ] 
+
+#removing 'choice' Selections:
+dive_data <- dive_data[str_detect(dive_data$Name, "Course", negate=TRUE), ] 
+
+#removing 'Voucher' Products:
+dive_data <- dive_data[str_detect(dive_data$Name, "Choice", negate=TRUE), ] 
+
+#removing price of 0 or less:
+dive_data <- filter(dive_data,dive_data$Total_Tax_Inclusive_Price > .99) 
+
+
+nrow(dive_data)
+head(dive_data)
+```
+
+
+
+After inspecting the columns, I use subject matter knowledge to identify columns that are not neccessary for Market Basket Analysis or will not add any useful information. Some columns have been left in to allow me to filter the data  at a later time
+
+Company ID: The Same for all receipts - Remove
+Company_Name: The same for all receipts - Remove
+Created_By - Member of staff who created the receipt - Remove
+Modification_Date - Not relevant - remove
+last_modified_by - remove
+Product_ID
+Status 
+Tax_Exclusive_Price
+Taxc_Inclusive_Price
+Total_Tax_Exclusive_Price
+Total_Tax_Inclusive_Price
+Tax_Percentage
+Category
+Category_Type
+Seat_Number
+Course_Number
+Extra
+PLU
+
+The columns will be dropped used the 'dplyr' library's 'select' function.
+
+```{r}
+
+library(dplyr)
+dive_data <- select(dive_data, -c(Company_ID, Company_Name, Created_By, Modification_Date, Last_modified_by, Product_ID, Status,Kitchen_Name, Tax_Exclusive_Price, Total_Tax_Exclusive_Price, Total_Tax_Inclusive_Price, Tax_Percentage, Seat_Number, Extra, PLU, ))
+head(dive_data)
+nrow(dive_data)
+summary(dive_data)
+
+
+
+```
+
+At this point, I could further filter the data in order to conduct market basket analysis on more specific circumstances: Products priced over £20, Food or drink categories etc, Course items. I will save this new dataframe as a CSV for future use and I will use this in SAS so as to not have to repeat the cleaning steps for a second time.
+
+```{r}
+#write.csv(dive_data, "C:\\Users\\Tom\\Desktop\\SAS\\ASDM CourseWork\\clean_dive_data.csv")
+```
+
+Grouping by product name to get visualise the best and worst selling products useing the aggregate function and using the arrange function to get the best and worse selling products for:
+Food
+Drinks
+By Food Categories
+By Drinks Categories
+
+finding the total number of receipts with food on them and total number of receipts with drinks on them
+
+Reference: GGPlot2 Essentials
+
+```{r}
+library(ggplot2)
+library(RColorBrewer)
+library(ggthemes)
+
+#Splitting the food and drinks products and 
+food_data <- filter(dive_data, Category_Type == "Food") #Selects the products by category
+number_of_food_receipts <- sapply(food_data, function(x) length(unique(x)))
+food_sales <- aggregate(food_data$Quantity, by=list(Name=food_data$Name ), FUN=sum) #aggregates the products names by quantity sold
+food_sales <- food_sales %>% rename(Sales = x,, Product = Name) #renames the column names to appropriate titles
+food_category_sales <- aggregate(food_data$Quantity, by=list(Name=food_data$Category), FUN=sum)
+food_category_sales <- food_category_sales %>% rename(Sales = x,, Category = Name)
+head(food_sales) #check the first few rows to ensure functions have worked as intended
+head(food_category_sales)
+
+
+
+
+drinks_data <- filter(dive_data, Category_Type == "Drinks")
+drinks_sales <- aggregate(drinks_data$Quantity, by=list(Name=drinks_data$Name ), FUN=sum)
+drinks_sales <- drinks_sales %>% rename(Sales = x, Product = Name)
+drinks_category_sales <- aggregate(drinks_data$Quantity, by=list(Name=drinks_data$Category), FUN=sum)
+drinks_category_sales <- drinks_category_sales %>% rename(Sales = x,, Category = Name)
+head(drinks_sales)
+head(drinks_category_sales)
+
+#Finding the top and bottom 20 results for each product area
+top_20_food <- head(arrange(food_sales, desc(Sales)), n=20)
+bottom_20_food <-head(arrange(food_sales, Sales), n=20)
+
+top_food_category <- head(arrange(food_category_sales, desc(Sales)), n=20) #bottom and n=20 not needed as only few categories
+
+
+top_20_drinks <- head(arrange(drinks_sales, desc(Sales)), n=20)
+bottom_20_drinks <-head(arrange(drinks_sales, Sales), n=20)
+
+top_drinks_category <- head(arrange(drinks_category_sales, desc(Sales)), n=20)#bottom and n=20 not needed as only few categories
+
+
+
+#Plotting the top and bottom 20 results for each product area
+top_food_barplot <- ggplot(data = top_20_food, aes(x=reorder(Product, -Sales), y=Sales)) + geom_bar(stat="identity" ) + scale_fill_brewer(palette = "Set1") + theme(axis.text.x=element_text(angle=90,hjust=1)) + ggtitle("Top 20 Selling Food Products")
+
+bottom_food_barplot <- ggplot(data = bottom_20_food, aes(x=reorder(Product, -Sales), y=Sales)) + geom_bar(stat="identity" ) + scale_fill_brewer(palette = "Set1") + theme(axis.text.x=element_text(angle=90,hjust=1)) + ggtitle("Worst 20 Selling Food Products") 
+
+top_food_category_barplot <- ggplot(data = top_food_category, aes(x=reorder(Category, -Sales), y=Sales)) + geom_bar(stat="identity" ) + scale_fill_brewer(palette = "Set1") + theme(axis.text.x=element_text(angle=90,hjust=1)) + ggtitle("Top 20 Selling Food Categories")
+
+top_drinks_category_barplot <- ggplot(data = top_drinks_category, aes(x=reorder(Category, -Sales), y=Sales)) + geom_bar(stat="identity" ) + scale_fill_brewer(palette = "Set1") + theme(axis.text.x=element_text(angle=90,hjust=1)) + ggtitle("Top  Selling Drinks Categories") 
+
+top_drinks_barplot <- ggplot(data = top_20_drinks, aes(x=reorder(Product, -Sales), y=Sales)) + geom_bar(stat="identity" ) + scale_fill_brewer(palette = "Set1") + theme(axis.text.x=element_text(angle=90,hjust=1)) + ggtitle("Top  Selling Drinks Items") 
+
+bottom_drinks_barplot <- ggplot(data = bottom_20_drinks, aes(x=reorder(Product, -Sales), y=Sales)) + geom_bar(stat="identity" ) + scale_fill_brewer(palette = "Set1") + theme(axis.text.x=element_text(angle=90,hjust=1)) + ggtitle("Bottom  Selling Drinks Items") 
+
+
+
+
+top_food_barplot
+bottom_food_barplot
+top_food_category_barplot
+top_drinks_barplot
+bottom_drinks_barplot
+top_drinks_category_barplot
+print(number_of_food_receipts)
+
+```
+
+You can see the most highly sold and least highly sold food products.
+
+Also the most and least sold drinks and food categories.
+
+To reduce the number of rules and to increase the relevancy of the rules, I will focus on category sales. 
+
+
+
+
+
+
+For the purposes of this analysis I want to look at all sales as a whole. Therefore I must remove all data except for Receipt_ID and Product Name. The dataframe will then need to be converted into a binary matrix in order to use the Apriori algorithm. 
+
+
+Plotting the most sold items in GGplot 2
+
+
+```{r}
+
+
+library(ggplot2)
+binary_dive <- select(dive_data, c(Receipt_ID, Name))
+head(binary_dive)
+dim(binary_dive)
+
+
+binary_dive <- table(binary_dive)
+#Converting binary matrix into transaction data:
+binary_dive <- as.data.frame.matrix(binary_dive)
+head(binary_dive)
+
+
+#Unfortunately the variables are still continuous. We do not need to know the quantities of each item on each receipt, only whether in was purchased or not. I then converted the continuous variable to a discrete one using the discretize function from the arules package :
+
+#binary_dive <- discretizeDF(binary_dive, default = list(method = "fixed", breaks = c(-Inf,1,Inf), labels =(c( 0 , 1))))
+#applying the as.logical function to the binary_dive dataset in order to convert "0" values to False and any non zero value into True
+logical_dive <- apply(binary_dive, 2, as.logical)
+logical_dive <- as.data.frame(logical_dive)
+head(logical_dive)
+ncol(logical_dive)
+nrow(logical_dive)
+summary(logical_dive)
+
+```
+
+
+
+Plotting barplots of the dataset to get an understanding of the distribution of purchases and non purchases:
+
+```{r}
+#colSums() function computes the sums of columns.
+yes <-colSums(binary_dive == TRUE)
+
+no<-colSums(binary_dive==FALSE) 
+
+purchased <-rbind(yes,no)
+
+barplot(purchased,legend=rownames(purchased)) #Plot 1
+barplot(purchased, beside=T,legend=rownames(purchased))# Plot 2
+#summary(binary_dive)
+#typeof(binary_dive)
+```
+
+
+
+
+
+
+Begining implementation of market basket analysis:
+
+Initially confidence and support set to default, however this resulted in 0 rules. I tuned the support to a very low figure due to the number of potential products to be purchased and set the confidence at 0.5. 
+
+```{r}
+library(arules)
+
+rules <- apriori(logical_dive, parameter=list(minlen=2, maxlen=5, support = 0.01, confidence = 0.6))
+                 
+
+top_confidence <- sort(rules, decreasing = TRUE, na.last = NA, by = "confidence")
+inspect(top_confidence)
+
+
+
+```
+
+
+Inspecting the top 20 rules by Lift
+
+```{r}
+top_lift <- sort(rules, decreasing = TRUE, na.last = NA, by = "lift")
+inspect(head(top_lift, 20))
+
+```
+
+
+Top 20 rules by support
+
+
+
+
+```{r}
+top_support<- sort(rules, decreasing = TRUE, na.last = NA, by = "support")
+inspect(head(top_support, 20))
+
+
+
+```
+
+Analysis notes:
+
+The support of most rules was set to 0.01. This is unusually low. This is mostly due to the range of products in the dataset (291). As there are so many, the likelihood of an identical transaction appearing many times is very low.
+
+The confidence of each transactions is quite high, that means for a transaction containing the item on the LHS, there is a high probability it will contain an item on the right hand side. 
+
+This is a good preliminary analysis, however some items are not enlightening or are things that can be deduced from looking at raw sales figures and intuition: Lemonade is commonly sold with spirits as a mixer, French fries are commonly sold with food items.
+
+
+How can this knowledge be used to increase footfall:
+To increase footfall we can create an offer which includes items we know that customers frequently buy together. 
+
+Free Mixer with purchase of a spirit
+Free side with the purchase of a main
+
+
+
+How can this knowledge be used to increase spend per head:
+Sides frequently bought with other sides so second side half price, 3/2 to encourage extra spending.
+
+
+
+
+
+
+
+Revisiting the analysis from another perspective:
+
+Splitting food from the main dataset and analysing independently. Repeating steps above to convert to binary matrix
+
+```{r}
+
+
+
+binary_food <- select(food_data, c(Receipt_ID, Name))
+head(food_data)
+
+binary_food <- table(binary_food)
+#Converting binary matrix into transaction data:
+binary_food <- as.data.frame.matrix(binary_food)
+head(binary_food)
+
+#Unfortunately the variables are still continuous. We do not need to know the quantities of each item on each receipt, only whether in was purchased or not. I then converted the continuous variable to a discrete one using the discretize function from the arules package :
+
+#binary_dive <- discretizeDF(binary_dive, default = list(method = "fixed", breaks = c(-Inf,1,Inf), labels =(c( 0 , 1))))
+#applying the as.logical function to the binary_dive dataset in order to convert "0" values to False and any non zero value into True
+logical_food <- apply(binary_food, 2, as.logical)
+logical_food <- as.data.frame(logical_food)
+head(logical_food)
+ncol(logical_food)
+nrow(logical_food)
+summary(logical_food)
+```
+
+Rerunning the apriori algorithm on only the food product data
+
+```{r}
+rules2 <- apriori(logical_food, parameter=list(minlen=2, maxlen=5, support = 0.015, confidence = 0.7))
+
+top_lift_food <- sort(rules2, decreasing = TRUE, na.last = NA, by = "lift")
+inspect(top_lift_food)
+```
+Drinks only rule analysis:
+
+
+
+```{r}
+top_lift <- sort(rules, decreasing = TRUE, na.last = NA, by = "lift")
+
+binary_drinks <- select(drinks_data, c(Receipt_ID, Name))
+head(drinks_data)
+
+binary_drinks <- table(binary_drinks)
+#Converting binary matrix into transaction data:
+binary_drinks <- as.data.frame.matrix(binary_drinks)
+head(binary_drinks)
+
+
+logical_drinks <- apply(binary_drinks, 2, as.logical)
+logical_drinks <- as.data.frame(logical_drinks)
+head(logical_drinks)
+ncol(logical_drinks)
+nrow(logical_drinks)
+summary(logical_drinks)
+```
+
+Analysing the drinks rules:
+
+```{r}
+rules2 <- apriori(logical_drinks, parameter=list(minlen=2, maxlen=5, support = 0.01, confidence = 0.6))
+
+top_lift_drinks <- sort(rules2, decreasing = TRUE, na.last = NA, by = "lift")
+inspect(top_lift_drinks)
+```
+
+
+
+
+
+As with the data as a whole, the majority of the rules created are not particularly interesting: French Fries bought with mains etc.
+
+In order to reduce the number of rules created and attain more informative rules, the apriori algorith will be run with the categorical data for both food and drinks:
+
+need to create function to change variable names to make all of these tables!!!!
+
+```{r}
+
+
+binary_category_food <- select(food_data, c(Receipt_ID, Category))
+
+binary_category_food <- table(binary_category_food)
+#Converting binary matrix into transaction data:
+head(binary_category_food)
+binary_category_food <- as.data.frame.matrix(binary_category_food)
+head(binary_category_food)
+logical_category_food <- apply(binary_category_food, 2, as.logical)
+logical_category_food <- as.data.frame(logical_category_food)
+head(logical_category_food)
+ncol(logical_category_food)
+nrow(logical_category_food)
+summary(logical_category_food)
+
+
+#Creating the Drink Category Data:
+
+binary_category_drinks <- select(drinks_data, c(Receipt_ID, Category))
+
+
+binary_category_drinks <- table(binary_category_drinks)
+#Converting binary matrix into transaction data:
+
+binary_category_drinks <- as.data.frame.matrix(binary_category_drinks)
+
+
+logical_category_drinks <- apply(binary_category_drinks, 2, as.logical)
+logical_category_drinks <- as.data.frame(logical_category_drinks)
+head(logical_category_drinks)
+ncol(logical_category_drinks)
+nrow(logical_category_drinks)
+summary(logical_category_drinks)
+
+
+
+
+# Creating all category matrix:
+binary_category_all <- select(dive_data, c(Receipt_ID, Category))
+head(binary_category_all) 
+
+binary_category_all <- table(binary_category_all)
+#Converting binary matrix into transaction data:
+
+binary_category_all <- as.data.frame.matrix(binary_category_all)
+
+
+logical_category_all <- apply(binary_category_all, 2, as.logical)
+logical_category_all <- as.data.frame(logical_category_all)
+head(logical_category_all)
+ncol(logical_category_all)
+nrow(logical_category_all)
+summary(logical_category_all)
+
+#write.csv(logical_category_drinks, "C:/Users/Tom/Desktop/SAS/ASDM CourseWork/logical_category_drinks.csv")
+#write.csv(logical_category_food, "C:/Users/Tom/Desktop/SAS/ASDM CourseWork/logical_category_food.csv")
+#write.csv(logical_category_all, "C:/Users/Tom/Desktop/SAS/ASDM CourseWork/logical_category_all.csv")
+
+
+```
+Running the apriori algorithm on the the category datasets:
+
+```{r}
+#Food categories:
+rules3 <- apriori(logical_category_food, parameter=list(minlen=2, maxlen=4, support = 0.01, confidence = 0.6))
+#summary(rules3)
+inspect(sort(rules3, by = "lift"))
+
+#Drinks categories:
+head(logical_category_drinks)
+#logical_category_drinks <- select(logical_category_drinks, -c(SOFTS))
+rules4 <- apriori(logical_category_drinks, parameter=list(minlen=2, maxlen=4, support = 0.01, confidence = 0.5))
+
+
+inspect(sort(rules4, by = "lift"))
+#rules4_no_softs <- subset(rules4, !(items %in% 'SOFTS'))
+#inspect(sort(rules4_no_softs, by = "lift"))
+#inspecting drinks rules that do not include soft drinks
+
+
+```
+
+
+
+
+Interesting rules, would like to look for rules that cross the boundaries of both foods and drinkss categories. Decided to continue apriori analysis with both drinks and food categories
+
+```{r}
+#All categories:
+library(arulesViz)
+rules5 <- apriori(logical_category_all, parameter=list(minlen=2, maxlen=4, support = 0.01, confidence = 0.6))
+#inspect(sort(rules5, by = "lift"))
+ruleExplorer(rules5)
+```
+
+
+Visualising the results with arulesViz:
+
+```{r}
+library(arulesViz)
+
+plot(rules5, method="grouped")
+plot(rules@quality)
+plotly_arules(rules3,  measure = c("support", "lift"), shading = "confidence")
+```
+
+
+
+

@@ -1,0 +1,303 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+Importing the data
+
+```{r}
+data<- read.csv("C:/Users/Tom/Desktop/University Work/ASDM CourseWork/Clustering New/clean_dive_data.csv", header=TRUE)
+head(data)
+str(data)
+
+```
+
+Collapsing data to:
+
+Receipt_ID, Number of Products, Price, Categories, Food Ordered>
+
+```{r}
+library(dplyr)
+#Summed the prices to get a total for bill and added blank category type col
+grouped_df <- data %>% group_by(Receipt_ID) %>% summarise(Total_Spend = sum(Tax_Inclusive_Price))
+
+
+head(grouped_df)
+
+```
+Adding Quantity of Items Ordered Column:
+
+```{r}
+#Creating table as each row contains 1 item:
+
+
+freq_table <- as.data.frame(table(data$Receipt_ID))
+
+grouped_df$Items_Ordered <- freq_table$Freq
+
+head(grouped_df)
+
+```
+
+
+
+
+
+
+
+
+Adding TRUE/FALSE for Food Ordered column:
+
+
+```{r}
+#grouping receipt ID's and Category_Types
+category_col <- data %>% group_by(Receipt_ID) %>% summarise(Category_Types = (paste0(Category_Type, sep="", collapse = NULL)))
+head(category_col)
+#Creating Frequency table for both food and drinks and converting to data frame
+table_category <- as.data.frame.matrix(table(category_col))
+head(table_category)
+#Converting Food Category Column to Logical (Ordered food, True, False)
+table_category$Food <- as.logical(table_category$Food)
+
+
+#Writing logical food column to grouped data frame:
+
+grouped_df$Ordered_Food <- table_category$Food
+head(grouped_df)
+
+write.csv(grouped_df, "C:/Users/Tom/Desktop/University Work/ASDM CourseWork/Clustering New SAS/Dive_Data.csv")
+```
+
+
+Exploring the dataset:
+dropping ID column:
+
+```{r}
+library(dplyr)
+grouped_df <- select(grouped_df,-c(Receipt_ID))
+
+grouped_data <- grouped_df %>% group_by(Ordered_Food) %>% summarise(count = n())
+
+grouped_data
+summary(grouped_df)
+```
+
+987 Non food tables 653 tables ordered food
+
+
+
+Plotting distributions of each variable:
+```{r}
+library(tidyr)
+library(ggplot2)
+# Histogram for each Attribute
+grouped_df %>%
+  gather(Attributes, value) %>%
+  ggplot(aes(x=value, fill=Attributes)) +
+  geom_histogram(colour="black", show.legend=FALSE) +
+  facet_wrap(~Attributes, scales="free_x") +
+  labs(x="Variables", y="Frequency",
+       title="Customer Variables Histograms") + theme_grey()
+```
+
+Plotting Boxplots of variables:
+
+```{r}
+grouped_df %>%
+  gather(Attributes, value) %>%
+  ggplot(aes(x=value, fill=Attributes)) +
+  geom_boxplot(colour="black", show.legend=FALSE) +
+  facet_wrap(~Attributes, scales="free_x") +
+  labs(x="Variables", y="Frequency",
+       title="Customer Variables  Boxplots") + theme_grey()
+```
+Plotting correlation Matrix:
+
+```{r}
+library(reshape2)
+
+correlation_matrix <- cor(grouped_df)
+head(correlation_matrix)
+melt_correlation_matrix <- melt(correlation_matrix)
+head(melt_correlation_matrix)
+
+ggplot(data = melt_correlation_matrix, aes(x=Var1, y=Var2, fill=value)) + geom_tile() + ggtitle("Correlation Heat Map") + xlab("Variables") + ylab("Variables") + labs(fill= "Correlation Coefficient") + theme(axis.text.x=element_text(angle=90, hjust=1)) + scale_fill_distiller(palette = "RdBu")
+```
+Calculatiung Hopkins Statistic
+```{r}
+library(clustertend)
+library(factoextra)
+
+
+
+
+hop <- get_clust_tendency(grouped_df, n=nrow(grouped_df)-1, graph = FALSE)
+hop$hopkins_stat
+```
+
+Hopkins Statistic is 0.95 so there are signifcant clusters in the data.
+
+Finding optimum number of clusters:
+
+```{r}
+wcss = vector()
+for (i in 1:10) wcss[i] = sum(kmeans(grouped_df, i)$withinss)
+plot(1:10,
+     wcss,
+     type = 'b',
+     main = paste('Elbow Method - Unscaled Data'),
+     xlab = 'Number of clusters(K)',
+     ylab = 'WCSS')
+```
+Optimum Clusters is 3
+
+Implementing k means:
+```{r}
+kmeans = kmeans(x = grouped_df, centers = 3)
+y_kmeans = kmeans$cluster
+```
+Plotting Kmeans:
+
+```{r}
+clustplot <- fviz_cluster(kmeans, data = grouped_df,
+             
+             geom = "point",
+             ellipse.type = "convex", 
+             ggtheme = theme_grey(),
+             axes = c(1,2),
+             main="Customer Clusters - Non Scaled Data"
+              
+                      )
+             
+clustplot
+table(y_kmeans)
+```
+Finding what the principal components are:
+
+```{r}
+PCA <- prcomp(grouped_df)
+summary(PCA)
+PCA
+```
+Plotting Clusters over variable scatter plots:
+
+```{r}
+library(GGally)
+ggpairs(cbind(grouped_df, Cluster=as.factor(y_kmeans)),
+        columns=1:3, aes(colour=Cluster, alpha=0.5),
+        lower=list(continuous="points"),
+        upper=list(continuous="blank"),
+        axisLabels="none", switch="both") +
+        theme_grey()
+
+
+```
+Retrying with scaling as Total_Spend having very large effect on cluster:
+
+
+```{r}
+grouped_scaled <- as.data.frame(scale(grouped_df, center=TRUE, scale=TRUE))
+head(grouped_scaled)
+summary(grouped_scaled)
+sd(grouped_scaled$Total_Spend
+        )
+sd(grouped_scaled$Items_Ordered
+        )
+sd(grouped_scaled$Ordered_Food)
+```
+Plotting to see scaled data:
+
+```{r}
+p1 <- ggplot(grouped_df, aes(x=Total_Spend, y=Items_Ordered)) +
+  geom_point() +
+  labs(title="Before Scaling") +
+  theme_grey()
+
+# Normalized data 
+p2 <- ggplot(grouped_scaled, aes(x=Total_Spend, y=Items_Ordered)) +
+  geom_point() +
+  labs(title="Z Score Scaled Data") +
+  theme_grey()
+
+# Subplot
+p1
+p2
+```
+
+Rechecking Hopkins Stat:
+
+```{r}
+grouped_hop_scaled <- get_clust_tendency(grouped_scaled, n=nrow(grouped_scaled)-1, graph = FALSE)
+grouped_hop_scaled$hopkins_stat
+```
+
+Rechecking optimum number of clusters:
+
+```{r}
+wcss = vector()
+for (i in 1:10) wcss[i] = sum(kmeans(grouped_scaled, i)$withinss)
+plot(1:10,
+     wcss,
+     type = 'b',
+     main = paste('Elbow Method - Scaled Data'),
+     xlab = 'Number of clusters (K)',
+     ylab = 'WCSS')
+```
+
+Optimum clusters is still 3
+
+```{r}
+kmeans_scaled = kmeans(x = grouped_scaled, centers = 3
+                       
+                    
+                      
+                       )
+y_kmeans_scaled = kmeans_scaled$cluster
+
+fviz_cluster(kmeans_scaled, data = grouped_scaled,
+             
+             geom = "point",
+             ellipse.type = "convex", 
+             ggtheme = theme_grey(),
+             axes = c(1,2),
+             main = "Scaled Data Clusters K = 3",
+             xlab = "PC1 70.60%",
+             ylab = "PC2 26.67%"
+             )
+
+table(y_kmeans_scaled)
+```
+Inspecting PC:
+
+```{r}
+PCA2 <- prcomp(grouped_scaled)
+summary(PCA2)
+PCA2
+```
+Plotting PCA:
+```{r}
+library(AMR)
+ggplot_pca(PCA2,  ellipse = TRUE) +   scale_color_discrete(name = '') +
+  theme(legend.direction = 'horizontal', legend.position = 'top')
+```
+
+
+```{r}
+fviz_pca_biplot(PCA2, geom= c("point"),ggtheme = theme_grey(), habillage = y_kmeans_scaled, addEllipses = FALSE, title = "Principal Component Plot K =3", xlab= "PC1 70.60%", ylab = "PC2 26.67%")
+```
+
+
+
+
+Inspecting the clusters by variable:
+
+```{r}
+ggpairs(cbind(grouped_scaled, Cluster=as.factor(y_kmeans_scaled
+                                                )),
+        columns=1:3, aes(colour=Cluster, alpha=0.5),
+        lower=list(continuous="points"),
+        upper=list(continuous="blank"),
+        axisLabels="none", switch="both") +
+        theme_grey()
+```
+
